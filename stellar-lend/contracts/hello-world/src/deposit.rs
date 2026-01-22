@@ -25,6 +25,7 @@ pub enum DepositError {
 /// Storage keys for deposit-related data
 #[contracttype]
 #[derive(Clone)]
+#[cfg_attr(test, derive(Debug, PartialEq))]
 pub enum DepositDataKey {
     /// User collateral balances: Map<Address, I128>
     CollateralBalance(Address),
@@ -46,7 +47,7 @@ pub enum DepositDataKey {
 
 /// Asset parameters for collateral
 #[contracttype]
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct AssetParams {
     /// Whether deposits are enabled for this asset
     pub deposit_enabled: bool,
@@ -58,7 +59,7 @@ pub struct AssetParams {
 
 /// User position tracking
 #[contracttype]
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Position {
     /// Total collateral amount
     pub collateral: i128,
@@ -72,7 +73,7 @@ pub struct Position {
 
 /// Activity log entry
 #[contracttype]
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Activity {
     /// User address
     pub user: Address,
@@ -90,7 +91,7 @@ pub struct Activity {
 
 /// User analytics
 #[contracttype]
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct UserAnalytics {
     /// Total deposits
     pub total_deposits: i128,
@@ -122,7 +123,7 @@ pub struct UserAnalytics {
 
 /// Protocol analytics
 #[contracttype]
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct ProtocolAnalytics {
     /// Total deposits across all users
     pub total_deposits: i128,

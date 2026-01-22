@@ -42,3 +42,6 @@ impl HelloContract {
             .unwrap_or_else(|e| panic!("Deposit error: {:?}", e))
     }
 }
+
+#[cfg(test)]
+mod test;
