@@ -1,5 +1,5 @@
 #![no_std]
-use soroban_sdk::{contract, contractimpl, Address, Env, Map, String, Symbol};
+use soroban_sdk::{contract, contractimpl, Address, Env, Map, String, Symbol, Vec};
 
 mod deposit;
 mod risk_management;
@@ -22,6 +22,14 @@ use repay::repay_debt;
 mod borrow;
 use borrow::borrow_asset;
 
+mod governance;
+use governance::{
+    approve_proposal, create_proposal, execute_multisig_proposal, execute_proposal,
+    get_multisig_admins, get_multisig_threshold, get_proposal, get_proposal_approvals, get_vote,
+    initialize_governance, mark_proposal_failed, propose_set_min_collateral_ratio, set_multisig_admins,
+    set_multisig_threshold, GovernanceError, Proposal, ProposalStatus, ProposalType, Vote,
+};
+
 #[contract]
 pub struct HelloContract;
 
@@ -42,7 +50,9 @@ impl HelloContract {
     /// # Returns
     /// Returns Ok(()) on success
     pub fn initialize(env: Env, admin: Address) -> Result<(), RiskManagementError> {
-        initialize_risk_management(&env, admin)
+        initialize_risk_management(&env, admin.clone())?;
+        initialize_governance(&env, admin).map_err(|_| RiskManagementError::Unauthorized)?;
+        Ok(())
     }
 
     /// Deposit collateral into the protocol
@@ -359,6 +369,223 @@ impl HelloContract {
     /// - `user_activity_tracked`: User activity tracking event
     pub fn borrow_asset(env: Env, user: Address, asset: Option<Address>, amount: i128) -> i128 {
         borrow_asset(&env, user, asset, amount).unwrap_or_else(|e| panic!("Borrow error: {:?}", e))
+    }
+
+    // ============================================================================
+    // Governance Functions
+    // ============================================================================
+
+    /// Create a new governance proposal
+    ///
+    /// # Arguments
+    /// * `proposer` - The address creating the proposal
+    /// * `proposal_type` - The type of proposal
+    /// * `description` - Description of the proposal
+    /// * `voting_period` - Optional voting period in seconds (default: 7 days)
+    /// * `execution_timelock` - Optional execution timelock in seconds (default: 2 days)
+    /// * `voting_threshold` - Optional voting threshold in basis points (default: 50%)
+    ///
+    /// # Returns
+    /// Returns the proposal ID on success
+    pub fn gov_create_proposal(
+        env: Env,
+        proposer: Address,
+        proposal_type: ProposalType,
+        description: Symbol,
+        voting_period: Option<u64>,
+        execution_timelock: Option<u64>,
+        voting_threshold: Option<i128>,
+    ) -> Result<u64, GovernanceError> {
+        create_proposal(
+            &env,
+            proposer,
+            proposal_type,
+            description,
+            voting_period,
+            execution_timelock,
+            voting_threshold,
+        )
+    }
+
+    /// Vote on a proposal
+    ///
+    /// # Arguments
+    /// * `voter` - The address voting
+    /// * `proposal_id` - The proposal ID
+    /// * `vote` - The vote (For, Against, or Abstain)
+    /// * `voting_power` - The voting power of the voter
+    ///
+    /// # Returns
+    /// Returns Ok(()) on success
+    pub fn gov_vote(
+        env: Env,
+        voter: Address,
+        proposal_id: u64,
+        vote: Vote,
+        voting_power: i128,
+    ) -> Result<(), GovernanceError> {
+        governance::vote(&env, voter, proposal_id, vote, voting_power)
+    }
+
+    /// Execute a proposal
+    ///
+    /// # Arguments
+    /// * `executor` - The address executing the proposal
+    /// * `proposal_id` - The proposal ID
+    ///
+    /// # Returns
+    /// Returns Ok(()) on success
+    pub fn gov_execute_proposal(
+        env: Env,
+        executor: Address,
+        proposal_id: u64,
+    ) -> Result<(), GovernanceError> {
+        execute_proposal(&env, executor, proposal_id)
+    }
+
+    /// Mark a proposal as failed
+    ///
+    /// # Arguments
+    /// * `proposal_id` - The proposal ID
+    ///
+    /// # Returns
+    /// Returns Ok(()) on success
+    pub fn gov_mark_proposal_failed(env: Env, proposal_id: u64) -> Result<(), GovernanceError> {
+        mark_proposal_failed(&env, proposal_id)
+    }
+
+    /// Get a proposal
+    ///
+    /// # Arguments
+    /// * `proposal_id` - The proposal ID
+    ///
+    /// # Returns
+    /// Returns the proposal or None if not found
+    pub fn gov_get_proposal(env: Env, proposal_id: u64) -> Option<Proposal> {
+        get_proposal(&env, proposal_id)
+    }
+
+    /// Get a vote for a voter on a proposal
+    ///
+    /// # Arguments
+    /// * `proposal_id` - The proposal ID
+    /// * `voter` - The voter address
+    ///
+    /// # Returns
+    /// Returns the vote or None if not found
+    pub fn gov_get_vote(env: Env, proposal_id: u64, voter: Address) -> Option<Vote> {
+        get_vote(&env, proposal_id, voter)
+    }
+
+    // ============================================================================
+    // Multisig Functions
+    // ============================================================================
+
+    /// Set multisig admins
+    ///
+    /// # Arguments
+    /// * `caller` - The caller address (must be current multisig admin)
+    /// * `admins` - The new list of multisig admins
+    ///
+    /// # Returns
+    /// Returns Ok(()) on success
+    pub fn ms_set_admins(
+        env: Env,
+        caller: Address,
+        admins: Vec<Address>,
+    ) -> Result<(), GovernanceError> {
+        set_multisig_admins(&env, caller, admins)
+    }
+
+    /// Set multisig threshold
+    ///
+    /// # Arguments
+    /// * `caller` - The caller address (must be multisig admin)
+    /// * `threshold` - The number of approvals required
+    ///
+    /// # Returns
+    /// Returns Ok(()) on success
+    pub fn ms_set_threshold(
+        env: Env,
+        caller: Address,
+        threshold: u32,
+    ) -> Result<(), GovernanceError> {
+        set_multisig_threshold(&env, caller, threshold)
+    }
+
+    /// Propose setting minimum collateral ratio (multisig)
+    ///
+    /// # Arguments
+    /// * `proposer` - The proposer address (must be multisig admin)
+    /// * `new_ratio` - The new minimum collateral ratio in basis points
+    ///
+    /// # Returns
+    /// Returns the proposal ID on success
+    pub fn ms_propose_set_min_cr(
+        env: Env,
+        proposer: Address,
+        new_ratio: i128,
+    ) -> Result<u64, GovernanceError> {
+        propose_set_min_collateral_ratio(&env, proposer, new_ratio)
+    }
+
+    /// Approve a multisig proposal
+    ///
+    /// # Arguments
+    /// * `approver` - The approver address (must be multisig admin)
+    /// * `proposal_id` - The proposal ID
+    ///
+    /// # Returns
+    /// Returns Ok(()) on success
+    pub fn ms_approve(
+        env: Env,
+        approver: Address,
+        proposal_id: u64,
+    ) -> Result<(), GovernanceError> {
+        approve_proposal(&env, approver, proposal_id)
+    }
+
+    /// Execute a multisig proposal
+    ///
+    /// # Arguments
+    /// * `executor` - The executor address (must be multisig admin)
+    /// * `proposal_id` - The proposal ID
+    ///
+    /// # Returns
+    /// Returns Ok(()) on success
+    pub fn ms_execute(
+        env: Env,
+        executor: Address,
+        proposal_id: u64,
+    ) -> Result<(), GovernanceError> {
+        execute_multisig_proposal(&env, executor, proposal_id)
+    }
+
+    /// Get multisig admins
+    ///
+    /// # Returns
+    /// Returns the list of multisig admins
+    pub fn ms_get_admins(env: Env) -> Option<Vec<Address>> {
+        get_multisig_admins(&env)
+    }
+
+    /// Get multisig threshold
+    ///
+    /// # Returns
+    /// Returns the multisig threshold
+    pub fn ms_get_threshold(env: Env) -> u32 {
+        get_multisig_threshold(&env)
+    }
+
+    /// Get proposal approvals
+    ///
+    /// # Arguments
+    /// * `proposal_id` - The proposal ID
+    ///
+    /// # Returns
+    /// Returns the list of approvers
+    pub fn ms_get_approvals(env: Env, proposal_id: u64) -> Option<Vec<Address>> {
+        get_proposal_approvals(&env, proposal_id)
     }
 }
 

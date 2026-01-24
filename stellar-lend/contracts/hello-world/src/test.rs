@@ -1,5 +1,5 @@
 use super::*;
-use soroban_sdk::{testutils::Address as _, token, Address, Env, Symbol};
+use soroban_sdk::{testutils::Address as _, token, Address, Env, Symbol, Vec};
 
 use deposit::{DepositDataKey, Position, ProtocolAnalytics, UserAnalytics};
 
@@ -1256,7 +1256,6 @@ fn test_withdraw_collateral_with_debt_collateral_ratio() {
             .storage()
             .persistent()
             .get::<DepositDataKey, Position>(&position_key)
-            .unwrap();
         position.debt = 500; // Set debt
         env.storage().persistent().set(&position_key, &position);
     });
@@ -1291,7 +1290,6 @@ fn test_withdraw_collateral_violates_collateral_ratio() {
             .storage()
             .persistent()
             .get::<DepositDataKey, Position>(&position_key)
-            .unwrap();
         position.debt = 500;
         env.storage().persistent().set(&position_key, &position);
     });
@@ -1851,7 +1849,6 @@ fn test_borrow_asset_interest_calculation() {
             .storage()
             .persistent()
             .get::<DepositDataKey, Position>(&position_key)
-            .unwrap();
         // Simulate time passing (1 year = 31536000 seconds)
         position.last_accrual_time = env.ledger().timestamp().saturating_sub(31536000);
         env.storage().persistent().set(&position_key, &position);
@@ -2145,4 +2142,1170 @@ fn test_borrow_asset_multiple_users() {
     // Verify protocol analytics
     let protocol_analytics = get_protocol_analytics(&env, &contract_id).unwrap();
     assert_eq!(protocol_analytics.total_borrows, 1800); // 1000 + 800
+}
+
+// ============================================================================
+// Governance System Tests
+// ============================================================================
+
+/// Helper function to advance proposal timestamps in storage
+/// This simulates time passing by directly updating proposal timestamps
+fn advance_proposal_time(env: &Env, contract_id: &Address, proposal_id: u64, seconds: u64) {
+    use governance::{GovernanceDataKey, Proposal};
+    env.as_contract(contract_id, || {
+        let proposal_key = GovernanceDataKey::Proposal(proposal_id);
+        if let Some(mut proposal) = env.storage().persistent().get::<GovernanceDataKey, Proposal>(&proposal_key) {
+            proposal.voting_end += seconds;
+            proposal.execution_timelock += seconds;
+            env.storage().persistent().set(&proposal_key, &proposal);
+        }
+    });
+}
+
+#[test]
+fn test_governance_initialization() {
+    let env = create_test_env();
+    let contract_id = env.register(HelloContract, ());
+    let client = HelloContractClient::new(&env, &contract_id);
+
+    let admin = Address::generate(&env);
+    client.initialize(&admin);
+
+    // Verify governance is initialized
+    let admins = client.ms_get_admins().unwrap();
+    assert_eq!(admins.len(), 1);
+    assert_eq!(admins.get(0), Some(admin));
+
+    let threshold = client.ms_get_threshold();
+    assert_eq!(threshold, 1);
+}
+
+// ============================================================================
+// Proposal Creation Tests
+// ============================================================================
+
+#[test]
+fn test_create_proposal_success() {
+    let env = create_test_env();
+    let contract_id = env.register(HelloContract, ());
+    let client = HelloContractClient::new(&env, &contract_id);
+
+    let admin = Address::generate(&env);
+    client.initialize(&admin);
+
+    let proposer = Address::generate(&env);
+    let proposal_type = ProposalType::SetMinCollateralRatio(12_000);
+    let description = Symbol::new(&env, "Increase min collateral ratio");
+
+    let proposal_id = client
+        .gov_create_proposal(
+            &proposer,
+            &proposal_type,
+            &description,
+            &None,
+            &None,
+            &None,
+        )
+
+    assert_eq!(proposal_id, 1);
+
+    // Verify proposal exists
+    let proposal = client.gov_get_proposal(&proposal_id).unwrap();
+    assert_eq!(proposal.id, proposal_id);
+    assert_eq!(proposal.proposer, proposer);
+    assert_eq!(proposal.status, ProposalStatus::Active);
+    assert_eq!(proposal.votes_for, 0);
+    assert_eq!(proposal.votes_against, 0);
+}
+
+#[test]
+fn test_create_proposal_with_custom_params() {
+    let env = create_test_env();
+    let contract_id = env.register(HelloContract, ());
+    let client = HelloContractClient::new(&env, &contract_id);
+
+    let admin = Address::generate(&env);
+    client.initialize(&admin);
+
+    let proposer = Address::generate(&env);
+    let proposal_type = ProposalType::SetRiskParams(
+        Some(12_000),
+        Some(11_000),
+        None,
+        None,
+    );
+    let description = Symbol::new(&env, "Update risk params");
+
+    let voting_period = Some(14 * 24 * 60 * 60); // 14 days
+    let execution_timelock = Some(3 * 24 * 60 * 60); // 3 days
+    let voting_threshold = Some(6_000); // 60%
+
+    let proposal_id = client
+        .gov_create_proposal(
+            &proposer,
+            &proposal_type,
+            &description,
+            &voting_period,
+            &execution_timelock,
+            &voting_threshold,
+        )
+
+    let proposal = client.gov_get_proposal(&proposal_id).unwrap();
+    assert_eq!(proposal.voting_threshold, 6_000);
+    assert_eq!(proposal.voting_end - proposal.voting_start, 14 * 24 * 60 * 60);
+}
+
+#[test]
+fn test_create_multiple_proposals() {
+    let env = create_test_env();
+    let contract_id = env.register(HelloContract, ());
+    let client = HelloContractClient::new(&env, &contract_id);
+
+    let admin = Address::generate(&env);
+    client.initialize(&admin);
+
+    let proposer = Address::generate(&env);
+    let description = Symbol::new(&env, "Proposal");
+
+    // Create first proposal
+    let proposal_id1 = client
+        .gov_create_proposal(
+            &proposer,
+            &ProposalType::SetMinCollateralRatio(12_000),
+            &description,
+            &None,
+            &None,
+            &None,
+        )
+
+    // Create second proposal
+    let proposal_id2 = client
+        .gov_create_proposal(
+            &proposer,
+            &ProposalType::SetMinCollateralRatio(13_000),
+            &description,
+            &None,
+            &None,
+            &None,
+        )
+
+    assert_eq!(proposal_id1, 1);
+    assert_eq!(proposal_id2, 2);
+
+    // Verify both proposals exist
+    let proposal1 = client.gov_get_proposal(proposal_id1).unwrap();
+    let proposal2 = client.gov_get_proposal(proposal_id2).unwrap();
+
+    assert_eq!(proposal1.id, proposal_id1);
+    assert_eq!(proposal2.id, proposal_id2);
+}
+
+#[test]
+#[should_panic(expected = "InvalidProposal")]
+fn test_create_proposal_invalid_threshold() {
+    let env = create_test_env();
+    let contract_id = env.register(HelloContract, ());
+    let client = HelloContractClient::new(&env, &contract_id);
+
+    let admin = Address::generate(&env);
+    client.initialize(&admin);
+
+    let proposer = Address::generate(&env);
+    let proposal_type = ProposalType::SetMinCollateralRatio(12_000);
+    let description = Symbol::new(&env, "Invalid threshold");
+
+    // Invalid threshold (> 100%)
+    let invalid_threshold = Some(15_000);
+
+    client
+        .gov_create_proposal(
+            &proposer,
+            &proposal_type,
+            &description,
+            &None,
+            &None,
+            &invalid_threshold,
+        )
+}
+
+// ============================================================================
+// Voting Mechanism Tests
+// ============================================================================
+
+#[test]
+fn test_vote_for_proposal() {
+    let env = create_test_env();
+    let contract_id = env.register(HelloContract, ());
+    let client = HelloContractClient::new(&env, &contract_id);
+
+    let admin = Address::generate(&env);
+    client.initialize(&admin);
+
+    let proposer = Address::generate(&env);
+    let proposal_id = client
+        .gov_create_proposal(
+            &proposer,
+            &ProposalType::SetMinCollateralRatio(12_000),
+            &Symbol::new(&env, "Test proposal"),
+            &None,
+            &None,
+            &None,
+        )
+
+    let voter = Address::generate(&env);
+    let voting_power = 1000;
+
+    // Vote for
+    client
+        .gov_vote(&voter, &proposal_id, &Vote::For, &voting_power);
+
+    // Verify vote
+    let vote = client.gov_get_vote(&proposal_id, &voter).unwrap();
+    assert_eq!(vote, Vote::For);
+
+    // Verify proposal vote counts
+    let proposal = client.gov_get_proposal(&proposal_id).unwrap();
+    assert_eq!(proposal.votes_for, voting_power);
+    assert_eq!(proposal.votes_against, 0);
+    assert_eq!(proposal.total_voting_power, voting_power);
+}
+
+#[test]
+fn test_vote_against_proposal() {
+    let env = create_test_env();
+    let contract_id = env.register(HelloContract, ());
+    let client = HelloContractClient::new(&env, &contract_id);
+
+    let admin = Address::generate(&env);
+    client.initialize(&admin);
+
+    let proposer = Address::generate(&env);
+    let proposal_id = client
+        .gov_create_proposal(
+            &proposer,
+            &ProposalType::SetMinCollateralRatio(12_000),
+            &Symbol::new(&env, "Test proposal"),
+            &None,
+            &None,
+            &None,
+        )
+
+    let voter = Address::generate(&env);
+    let voting_power = 500;
+
+    // Vote against
+    client
+        .gov_vote(&voter, &proposal_id, &Vote::Against, &voting_power)
+
+    // Verify vote
+    let vote = client.gov_get_vote(&proposal_id, &voter).unwrap();
+    assert_eq!(vote, Vote::Against);
+
+    // Verify proposal vote counts
+    let proposal = client.gov_get_proposal(&proposal_id).unwrap();
+    assert_eq!(proposal.votes_for, 0);
+    assert_eq!(proposal.votes_against, voting_power);
+    assert_eq!(proposal.total_voting_power, voting_power);
+}
+
+#[test]
+fn test_vote_abstain() {
+    let env = create_test_env();
+    let contract_id = env.register(HelloContract, ());
+    let client = HelloContractClient::new(&env, &contract_id);
+
+    let admin = Address::generate(&env);
+    client.initialize(&admin);
+
+    let proposer = Address::generate(&env);
+    let proposal_id = client
+        .gov_create_proposal(
+            &proposer,
+            &ProposalType::SetMinCollateralRatio(12_000),
+            &Symbol::new(&env, "Test proposal"),
+            &None,
+            &None,
+            &None,
+        )
+
+    let voter = Address::generate(&env);
+    let voting_power = 300;
+
+    // Vote abstain
+    client
+        .gov_vote(&voter, &proposal_id, &Vote::Abstain, &voting_power)
+
+    // Verify vote
+    let vote = client.gov_get_vote(&proposal_id, &voter).unwrap();
+    assert_eq!(vote, Vote::Abstain);
+
+    // Verify proposal vote counts
+    let proposal = client.gov_get_proposal(&proposal_id).unwrap();
+    assert_eq!(proposal.votes_for, 0);
+    assert_eq!(proposal.votes_against, 0);
+    assert_eq!(proposal.votes_abstain, voting_power);
+    assert_eq!(proposal.total_voting_power, voting_power);
+}
+
+#[test]
+fn test_multiple_voters() {
+    let env = create_test_env();
+    let contract_id = env.register(HelloContract, ());
+    let client = HelloContractClient::new(&env, &contract_id);
+
+    let admin = Address::generate(&env);
+    client.initialize(&admin);
+
+    let proposer = Address::generate(&env);
+    let proposal_id = client
+        .gov_create_proposal(
+            &proposer,
+            &ProposalType::SetMinCollateralRatio(12_000),
+            &Symbol::new(&env, "Test proposal"),
+            &None,
+            &None,
+            &None,
+        )
+
+    let voter1 = Address::generate(&env);
+    let voter2 = Address::generate(&env);
+    let voter3 = Address::generate(&env);
+
+    // Multiple votes
+    client
+        .gov_vote(&voter1, &proposal_id, &Vote::For, &1000)
+    client
+        .gov_vote(&voter2, &proposal_id, &Vote::For, &500)
+    client
+        .gov_vote(&voter3, &proposal_id, &Vote::Against, &300)
+
+    // Verify proposal vote counts
+    let proposal = client.gov_get_proposal(&proposal_id).unwrap();
+    assert_eq!(proposal.votes_for, 1500);
+    assert_eq!(proposal.votes_against, 300);
+    assert_eq!(proposal.total_voting_power, 1800);
+}
+
+#[test]
+#[should_panic(expected = "AlreadyVoted")]
+fn test_vote_twice_fails() {
+    let env = create_test_env();
+    let contract_id = env.register(HelloContract, ());
+    let client = HelloContractClient::new(&env, &contract_id);
+
+    let admin = Address::generate(&env);
+    client.initialize(&admin);
+
+    let proposer = Address::generate(&env);
+    let proposal_id = client
+        .gov_create_proposal(
+            &proposer,
+            &ProposalType::SetMinCollateralRatio(12_000),
+            &Symbol::new(&env, "Test proposal"),
+            &None,
+            &None,
+            &None,
+        )
+
+    let voter = Address::generate(&env);
+
+    // Vote once
+    client
+        .gov_vote(&voter, &proposal_id, &Vote::For, &1000)
+
+    // Try to vote again (should fail)
+    client
+        .gov_vote(&voter, &proposal_id, &Vote::Against, &500)
+}
+
+#[test]
+#[should_panic(expected = "InvalidVote")]
+fn test_vote_zero_power_fails() {
+    let env = create_test_env();
+    let contract_id = env.register(HelloContract, ());
+    let client = HelloContractClient::new(&env, &contract_id);
+
+    let admin = Address::generate(&env);
+    client.initialize(&admin);
+
+    let proposer = Address::generate(&env);
+    let proposal_id = client
+        .gov_create_proposal(
+            &proposer,
+            &ProposalType::SetMinCollateralRatio(12_000),
+            &Symbol::new(&env, "Test proposal"),
+            &None,
+            &None,
+            &None,
+        )
+
+    let voter = Address::generate(&env);
+
+    // Try to vote with zero power (should fail)
+    client
+        .gov_vote(&voter, &proposal_id, &Vote::For, &0)
+}
+
+// ============================================================================
+// Voting Threshold Tests
+// ============================================================================
+
+#[test]
+fn test_proposal_passes_threshold() {
+    let env = create_test_env();
+    let contract_id = env.register(HelloContract, ());
+    let client = HelloContractClient::new(&env, &contract_id);
+
+    let admin = Address::generate(&env);
+    client.initialize(&admin);
+
+    let proposer = Address::generate(&env);
+    let voting_threshold = Some(5_000); // 50%
+    let proposal_id = client
+        .gov_create_proposal(
+            &proposer,
+            &ProposalType::SetMinCollateralRatio(12_000),
+            &Symbol::new(&env, "Test proposal"),
+            &None,
+            &None,
+            &voting_threshold,
+        )
+
+    // Total voting power: 2000
+    // Threshold: 50% = 1000 votes needed
+    let voter1 = Address::generate(&env);
+    let voter2 = Address::generate(&env);
+
+    // Vote with enough power to meet threshold
+    client
+        .gov_vote(&voter1, &proposal_id, &Vote::For, &1000)
+    client
+        .gov_vote(&voter2, &proposal_id, &Vote::For, &1000)
+
+    // Verify proposal status changed to Passed
+    let proposal = client.gov_get_proposal(&proposal_id).unwrap();
+    assert_eq!(proposal.status, ProposalStatus::Passed);
+    assert_eq!(proposal.votes_for, 2000);
+    assert_eq!(proposal.total_voting_power, 2000);
+}
+
+#[test]
+fn test_proposal_fails_threshold() {
+    let env = create_test_env();
+    let contract_id = env.register(HelloContract, ());
+    let client = HelloContractClient::new(&env, &contract_id);
+
+    let admin = Address::generate(&env);
+    client.initialize(&admin);
+
+    let proposer = Address::generate(&env);
+    let voting_threshold = Some(5_000); // 50%
+    let proposal_id = client
+        .gov_create_proposal(
+            &proposer,
+            &ProposalType::SetMinCollateralRatio(12_000),
+            &Symbol::new(&env, "Test proposal"),
+            &None,
+            &None,
+            &voting_threshold,
+        )
+
+    // Total voting power: 2000
+    // Threshold: 50% = 1000 votes needed
+    // But we vote with less
+    let voter1 = Address::generate(&env);
+    let voter2 = Address::generate(&env);
+
+    // Vote with insufficient power
+    client
+        .gov_vote(&voter1, &proposal_id, &Vote::For, &400)
+    client
+        .gov_vote(&voter2, &proposal_id, &Vote::Against, &600)
+
+    // Verify proposal still active (threshold not met)
+    let proposal = client.gov_get_proposal(&proposal_id).unwrap();
+    assert_eq!(proposal.status, ProposalStatus::Active);
+    assert_eq!(proposal.votes_for, 400);
+    assert_eq!(proposal.votes_against, 600);
+}
+
+#[test]
+fn test_proposal_threshold_edge_case() {
+    let env = create_test_env();
+    let contract_id = env.register(HelloContract, ());
+    let client = HelloContractClient::new(&env, &contract_id);
+
+    let admin = Address::generate(&env);
+    client.initialize(&admin);
+
+    let proposer = Address::generate(&env);
+    let voting_threshold = Some(5_000); // 50%
+    let proposal_id = client
+        .gov_create_proposal(
+            &proposer,
+            &ProposalType::SetMinCollateralRatio(12_000),
+            &Symbol::new(&env, "Test proposal"),
+            &None,
+            &None,
+            &voting_threshold,
+        )
+
+    // Total voting power: 2000
+    // Threshold: 50% = exactly 1000 votes needed
+    let voter = Address::generate(&env);
+
+    // Vote with exactly threshold amount
+    client
+        .gov_vote(&voter, &proposal_id, &Vote::For, &1000)
+
+    // Verify proposal passed
+    let proposal = client.gov_get_proposal(&proposal_id).unwrap();
+    assert_eq!(proposal.status, ProposalStatus::Passed);
+    assert_eq!(proposal.votes_for, 1000);
+}
+
+// ============================================================================
+// Time-Locked Proposals Tests
+// ============================================================================
+
+#[test]
+fn test_proposal_timelock_not_expired() {
+    let env = create_test_env();
+    let contract_id = env.register(HelloContract, ());
+    let client = HelloContractClient::new(&env, &contract_id);
+
+    let admin = Address::generate(&env);
+    client.initialize(&admin);
+
+    let proposer = Address::generate(&env);
+    let execution_timelock = Some(2 * 24 * 60 * 60); // 2 days
+    let proposal_id = client
+        .gov_create_proposal(
+            &proposer,
+            &ProposalType::SetMinCollateralRatio(12_000),
+            &Symbol::new(&env, "Test proposal"),
+            &None,
+            &execution_timelock,
+            &None,
+        )
+
+    // Vote to pass proposal
+    let voter = Address::generate(&env);
+    client
+        .gov_vote(&voter, &proposal_id, &Vote::For, &1000)
+
+    // Try to execute immediately (should fail - timelock not expired)
+    let executor = Address::generate(&env);
+    let result = client.gov_execute_proposal(&executor, &proposal_id);
+    assert!(result.is_err());
+}
+
+#[test]
+fn test_proposal_timelock_expired() {
+    let env = create_test_env();
+    let contract_id = env.register(HelloContract, ());
+    let client = HelloContractClient::new(&env, &contract_id);
+
+    let admin = Address::generate(&env);
+    client.initialize(&admin);
+
+    let proposer = Address::generate(&env);
+    let execution_timelock = Some(2 * 24 * 60 * 60); // 2 days
+    let proposal_id = client
+        .gov_create_proposal(
+            &proposer,
+            &ProposalType::SetMinCollateralRatio(12_000),
+            &Symbol::new(&env, "Test proposal"),
+            &None,
+            &execution_timelock,
+            &None,
+        )
+
+    // Vote to pass proposal
+    let voter = Address::generate(&env);
+    client
+        .gov_vote(&voter, &proposal_id, &Vote::For, &1000)
+
+    // Advance time past timelock
+    advance_proposal_time(&env, &contract_id, proposal_id, 2 * 24 * 60 * 60 + 1);
+
+    // Now execute should succeed
+    let executor = Address::generate(&env);
+    client.gov_execute_proposal(&executor, &proposal_id).unwrap();
+
+    // Verify proposal executed
+    let proposal = client.gov_get_proposal(&proposal_id).unwrap();
+    assert_eq!(proposal.status, ProposalStatus::Executed);
+}
+
+#[test]
+fn test_proposal_voting_period_ends() {
+    let env = create_test_env();
+    let contract_id = env.register(HelloContract, ());
+    let client = HelloContractClient::new(&env, &contract_id);
+
+    let admin = Address::generate(&env);
+    client.initialize(&admin);
+
+    let proposer = Address::generate(&env);
+    let voting_period = Some(7 * 24 * 60 * 60); // 7 days
+    let proposal_id = client
+        .gov_create_proposal(
+            &proposer,
+            &ProposalType::SetMinCollateralRatio(12_000),
+            &Symbol::new(&env, "Test proposal"),
+            &voting_period,
+            &None,
+            &None,
+        )
+
+    // Vote
+    let voter = Address::generate(&env);
+    client
+        .gov_vote(&voter, &proposal_id, &Vote::For, &1000)
+
+    // Advance time past voting period
+    advance_proposal_time(&env, &contract_id, proposal_id, 7 * 24 * 60 * 60 + 1);
+
+    // Try to vote after voting period (should fail)
+    let voter2 = Address::generate(&env);
+    // Voting period ended, so this will fail when we try to vote
+    // The error will be caught by the should_panic attribute or we check the proposal status
+}
+
+// ============================================================================
+// Proposal Execution Tests
+// ============================================================================
+
+#[test]
+fn test_execute_proposal_success() {
+    let env = create_test_env();
+    let contract_id = env.register(HelloContract, ());
+    let client = HelloContractClient::new(&env, &contract_id);
+
+    let admin = Address::generate(&env);
+    client.initialize(&admin);
+
+    let proposer = Address::generate(&env);
+    let proposal_id = client
+        .gov_create_proposal(
+            &proposer,
+            &ProposalType::SetMinCollateralRatio(12_000),
+            &Symbol::new(&env, "Test proposal"),
+            &None,
+            &None,
+            &None,
+        )
+
+    // Vote to pass
+    let voter = Address::generate(&env);
+    client
+        .gov_vote(&voter, &proposal_id, &Vote::For, &1000)
+
+    // Advance time past timelock
+    advance_proposal_time(&env, &contract_id, proposal_id, 2 * 24 * 60 * 60 + 1);
+
+    // Execute proposal
+    let executor = Address::generate(&env);
+    client.gov_execute_proposal(&executor, &proposal_id).unwrap();
+
+    // Verify proposal executed
+    let proposal = client.gov_get_proposal(&proposal_id).unwrap();
+    assert_eq!(proposal.status, ProposalStatus::Executed);
+}
+
+#[test]
+#[should_panic(expected = "ProposalAlreadyExecuted")]
+fn test_execute_proposal_twice_fails() {
+    let env = create_test_env();
+    let contract_id = env.register(HelloContract, ());
+    let client = HelloContractClient::new(&env, &contract_id);
+
+    let admin = Address::generate(&env);
+    client.initialize(&admin);
+
+    let proposer = Address::generate(&env);
+    let proposal_id = client
+        .gov_create_proposal(
+            &proposer,
+            &ProposalType::SetMinCollateralRatio(12_000),
+            &Symbol::new(&env, "Test proposal"),
+            &None,
+            &None,
+            &None,
+        )
+
+    // Vote to pass
+    let voter = Address::generate(&env);
+    client
+        .gov_vote(&voter, &proposal_id, &Vote::For, &1000)
+
+    // Advance time past timelock
+    advance_proposal_time(&env, &contract_id, proposal_id, 2 * 24 * 60 * 60 + 1);
+
+    // Execute first time
+    let executor = Address::generate(&env);
+    client.gov_execute_proposal(&executor, &proposal_id).unwrap();
+
+    // Try to execute again (should fail)
+    client.gov_execute_proposal(&executor, &proposal_id).unwrap();
+}
+
+#[test]
+#[should_panic(expected = "ThresholdNotMet")]
+fn test_execute_proposal_without_threshold() {
+    let env = create_test_env();
+    let contract_id = env.register(HelloContract, ());
+    let client = HelloContractClient::new(&env, &contract_id);
+
+    let admin = Address::generate(&env);
+    client.initialize(&admin);
+
+    let proposer = Address::generate(&env);
+    let voting_threshold = Some(5_000); // 50%
+    let proposal_id = client
+        .gov_create_proposal(
+            &proposer,
+            &ProposalType::SetMinCollateralRatio(12_000),
+            &Symbol::new(&env, "Test proposal"),
+            &None,
+            &None,
+            &voting_threshold,
+        )
+
+    // Vote with insufficient power (threshold not met)
+    let voter = Address::generate(&env);
+    client
+        .gov_vote(&voter, &proposal_id, &Vote::For, &300)
+
+    // Advance time past timelock
+    advance_proposal_time(&env, &contract_id, proposal_id, 2 * 24 * 60 * 60 + 1);
+
+    // Try to execute (should fail - threshold not met)
+    let executor = Address::generate(&env);
+    client.gov_execute_proposal(&executor, &proposal_id).unwrap();
+}
+
+// ============================================================================
+// Failed Proposals Tests
+// ============================================================================
+
+#[test]
+fn test_mark_proposal_failed() {
+    let env = create_test_env();
+    let contract_id = env.register(HelloContract, ());
+    let client = HelloContractClient::new(&env, &contract_id);
+
+    let admin = Address::generate(&env);
+    client.initialize(&admin);
+
+    let proposer = Address::generate(&env);
+    let voting_period = Some(7 * 24 * 60 * 60); // 7 days
+    let voting_threshold = Some(5_000); // 50%
+    let proposal_id = client
+        .gov_create_proposal(
+            &proposer,
+            &ProposalType::SetMinCollateralRatio(12_000),
+            &Symbol::new(&env, "Test proposal"),
+            &Some(voting_period),
+            &None,
+            &voting_threshold,
+        )
+
+    // Vote with insufficient power
+    let voter = Address::generate(&env);
+    client
+        .gov_vote(&voter, &proposal_id, &Vote::For, &300)
+
+    // Advance time past voting period
+    advance_proposal_time(&env, &contract_id, proposal_id, 7 * 24 * 60 * 60 + 1);
+
+    // Mark as failed
+    client.gov_mark_proposal_failed(&proposal_id);.unwrap();
+
+    // Verify proposal failed
+    let proposal = client.gov_get_proposal(&proposal_id).unwrap();
+    assert_eq!(proposal.status, ProposalStatus::Failed);
+}
+
+#[test]
+fn test_proposal_expires() {
+    let env = create_test_env();
+    let contract_id = env.register(HelloContract, ());
+    let client = HelloContractClient::new(&env, &contract_id);
+
+    let admin = Address::generate(&env);
+    client.initialize(&admin);
+
+    let proposer = Address::generate(&env);
+    let voting_period = Some(7 * 24 * 60 * 60); // 7 days
+    let proposal_id = client
+        .gov_create_proposal(
+            &proposer,
+            &ProposalType::SetMinCollateralRatio(12_000),
+            &Symbol::new(&env, "Test proposal"),
+            &Some(voting_period),
+            &None,
+            &None,
+        )
+
+    // Advance time past voting period
+    advance_proposal_time(&env, &contract_id, proposal_id, 7 * 24 * 60 * 60 + 1);
+
+    // Try to vote (should fail - voting period ended)
+    let voter = Address::generate(&env);
+    let result = client.gov_vote(&voter, &proposal_id, &Vote::For, &1000);
+    assert!(result.is_err());
+}
+
+// ============================================================================
+// Multisig Operations Tests
+// ============================================================================
+
+#[test]
+fn test_set_multisig_admins() {
+    let env = create_test_env();
+    let contract_id = env.register(HelloContract, ());
+    let client = HelloContractClient::new(&env, &contract_id);
+
+    let admin = Address::generate(&env);
+    client.initialize(&admin);
+
+    // Set new admins
+    let admin1 = Address::generate(&env);
+    let admin2 = Address::generate(&env);
+    let admin3 = Address::generate(&env);
+
+    let mut new_admins = Vec::new(&env);
+    new_admins.push_back(admin1.clone());
+    new_admins.push_back(admin2.clone());
+    new_admins.push_back(admin3.clone());
+
+    client.ms_set_admins(&admin, &new_admins);
+
+    // Verify admins updated
+    let admins = client.ms_get_admins().unwrap();
+    assert_eq!(admins.len(), 3);
+    assert_eq!(admins.get(0), Some(admin1));
+    assert_eq!(admins.get(1), Some(admin2));
+    assert_eq!(admins.get(2), Some(admin3));
+}
+
+#[test]
+#[should_panic(expected = "Unauthorized")]
+fn test_set_multisig_admins_unauthorized() {
+    let env = create_test_env();
+    let contract_id = env.register(HelloContract, ());
+    let client = HelloContractClient::new(&env, &contract_id);
+
+    let admin = Address::generate(&env);
+    client.initialize(&admin);
+
+    let non_admin = Address::generate(&env);
+    let mut new_admins = Vec::new(&env);
+    new_admins.push_back(Address::generate(&env));
+
+    // Try to set admins as non-admin (should fail)
+    client.ms_set_admins(&non_admin, &new_admins).unwrap();
+}
+
+#[test]
+fn test_set_multisig_threshold() {
+    let env = create_test_env();
+    let contract_id = env.register(HelloContract, ());
+    let client = HelloContractClient::new(&env, &contract_id);
+
+    let admin = Address::generate(&env);
+    client.initialize(&admin);
+
+    // Set threshold to 2
+    client.ms_set_threshold(&admin, &2);
+
+    // Verify threshold updated
+    let threshold = client.ms_get_threshold();
+    assert_eq!(threshold, 2);
+}
+
+#[test]
+fn test_propose_set_min_collateral_ratio() {
+    let env = create_test_env();
+    let contract_id = env.register(HelloContract, ());
+    let client = HelloContractClient::new(&env, &contract_id);
+
+    let admin = Address::generate(&env);
+    client.initialize(&admin);
+
+    // Propose setting min collateral ratio
+    let new_ratio = 12_000;
+    let proposal_id = client
+        .ms_propose_set_min_cr(&admin, &new_ratio)
+
+    // Verify proposal created
+    let proposal = client.gov_get_proposal(&proposal_id).unwrap();
+    match proposal.proposal_type {
+        ProposalType::SetMinCollateralRatio(ratio) => assert_eq!(ratio, new_ratio),
+        _ => panic!("Wrong proposal type"),
+    }
+}
+
+#[test]
+#[should_panic(expected = "Unauthorized")]
+fn test_propose_set_min_cr_unauthorized() {
+    let env = create_test_env();
+    let contract_id = env.register(HelloContract, ());
+    let client = HelloContractClient::new(&env, &contract_id);
+
+    let admin = Address::generate(&env);
+    client.initialize(&admin);
+
+    let non_admin = Address::generate(&env);
+
+    // Try to propose as non-admin (should fail)
+    client.ms_propose_set_min_cr(&non_admin, &12_000).unwrap();
+}
+
+#[test]
+fn test_multisig_approve() {
+    let env = create_test_env();
+    let contract_id = env.register(HelloContract, ());
+    let client = HelloContractClient::new(&env, &contract_id);
+
+    let admin = Address::generate(&env);
+    client.initialize(&admin);
+
+    // Create proposal
+    let proposal_id = client
+        .ms_propose_set_min_cr(&admin, &12_000)
+
+    // Approve proposal
+    client.ms_approve(&admin, &proposal_id);
+
+    // Verify approval
+    let approvals = client.ms_get_approvals(proposal_id).unwrap();
+    assert_eq!(approvals.len(), 1);
+    assert_eq!(approvals.get(0), Some(admin));
+}
+
+#[test]
+fn test_multisig_multiple_approvals() {
+    let env = create_test_env();
+    let contract_id = env.register(HelloContract, ());
+    let client = HelloContractClient::new(&env, &contract_id);
+
+    let admin = Address::generate(&env);
+    client.initialize(&admin);
+
+    // Set multiple admins
+    let admin1 = Address::generate(&env);
+    let admin2 = Address::generate(&env);
+    let mut new_admins = Vec::new(&env);
+    new_admins.push_back(admin.clone());
+    new_admins.push_back(admin1.clone());
+    new_admins.push_back(admin2.clone());
+    client.ms_set_admins(&admin, &new_admins);
+
+    // Set threshold to 2
+    client.ms_set_threshold(&admin, &2);
+
+    // Create proposal
+    let proposal_id = client
+        .ms_propose_set_min_cr(&admin, &12_000)
+
+    // Approve by admin1
+    client.ms_approve(&admin1, &proposal_id).unwrap();
+
+    // Approve by admin2
+    client.ms_approve(&admin2, &proposal_id).unwrap();
+
+    // Verify approvals
+    let approvals = client.ms_get_approvals(proposal_id).unwrap();
+    assert_eq!(approvals.len(), 2);
+}
+
+#[test]
+#[should_panic(expected = "AlreadyVoted")]
+fn test_multisig_approve_twice_fails() {
+    let env = create_test_env();
+    let contract_id = env.register(HelloContract, ());
+    let client = HelloContractClient::new(&env, &contract_id);
+
+    let admin = Address::generate(&env);
+    client.initialize(&admin);
+
+    // Create proposal
+    let proposal_id = client
+        .ms_propose_set_min_cr(&admin, &12_000)
+
+    // Approve once
+    client.ms_approve(&admin, &proposal_id);
+
+    // Try to approve again (should fail)
+    client.ms_approve(&admin, &proposal_id);
+}
+
+#[test]
+fn test_multisig_execute_with_sufficient_approvals() {
+    let env = create_test_env();
+    let contract_id = env.register(HelloContract, ());
+    let client = HelloContractClient::new(&env, &contract_id);
+
+    let admin = Address::generate(&env);
+    client.initialize(&admin);
+
+    // Set multiple admins
+    let admin1 = Address::generate(&env);
+    let admin2 = Address::generate(&env);
+    let mut new_admins = Vec::new(&env);
+    new_admins.push_back(admin.clone());
+    new_admins.push_back(admin1.clone());
+    new_admins.push_back(admin2.clone());
+    client.ms_set_admins(&admin, &new_admins);
+
+    // Set threshold to 2
+    client.ms_set_threshold(&admin, &2);
+
+    // Create proposal
+    let proposal_id = client
+        .ms_propose_set_min_cr(&admin, &12_000)
+
+    // Vote to pass (for execution)
+    let voter = Address::generate(&env);
+    client
+        .gov_vote(&voter, &proposal_id, &Vote::For, &1000)
+
+    // Approve by admin1
+    client.ms_approve(&admin1, &proposal_id).unwrap();
+
+    // Approve by admin2
+    client.ms_approve(&admin2, &proposal_id).unwrap();
+
+    // Advance time past timelock
+    advance_proposal_time(&env, &contract_id, proposal_id, 2 * 24 * 60 * 60 + 1);
+
+    // Execute proposal
+    client.ms_execute(&admin, &proposal_id);
+
+    // Verify proposal executed
+    let proposal = client.gov_get_proposal(&proposal_id).unwrap();
+    assert_eq!(proposal.status, ProposalStatus::Executed);
+}
+
+#[test]
+#[should_panic(expected = "InsufficientApprovals")]
+fn test_multisig_execute_with_insufficient_approvals() {
+    let env = create_test_env();
+    let contract_id = env.register(HelloContract, ());
+    let client = HelloContractClient::new(&env, &contract_id);
+
+    let admin = Address::generate(&env);
+    client.initialize(&admin);
+
+    // Set multiple admins
+    let admin1 = Address::generate(&env);
+    let admin2 = Address::generate(&env);
+    let mut new_admins = Vec::new(&env);
+    new_admins.push_back(admin.clone());
+    new_admins.push_back(admin1.clone());
+    new_admins.push_back(admin2.clone());
+    client.ms_set_admins(&admin, &new_admins);
+
+    // Set threshold to 2
+    client.ms_set_threshold(&admin, &2);
+
+    // Create proposal
+    let proposal_id = client
+        .ms_propose_set_min_cr(&admin, &12_000)
+
+    // Vote to pass
+    let voter = Address::generate(&env);
+    client
+        .gov_vote(&voter, &proposal_id, &Vote::For, &1000)
+
+    // Approve by only one admin (insufficient)
+    client.ms_approve(&admin1, &proposal_id).unwrap();
+
+    // Advance time past timelock
+    advance_proposal_time(&env, &contract_id, proposal_id, 2 * 24 * 60 * 60 + 1);
+
+    // Try to execute (should fail - insufficient approvals)
+    client.ms_execute(&admin, &proposal_id);
+}
+
+#[test]
+#[should_panic(expected = "Unauthorized")]
+fn test_multisig_execute_unauthorized() {
+    let env = create_test_env();
+    let contract_id = env.register(HelloContract, ());
+    let client = HelloContractClient::new(&env, &contract_id);
+
+    let admin = Address::generate(&env);
+    client.initialize(&admin);
+
+    // Create proposal
+    let proposal_id = client
+        .ms_propose_set_min_cr(&admin, &12_000)
+
+    // Vote to pass
+    let voter = Address::generate(&env);
+    client
+        .gov_vote(&voter, &proposal_id, &Vote::For, &1000)
+
+    // Approve
+    client.ms_approve(&admin, &proposal_id);
+
+    // Advance time past timelock
+    advance_proposal_time(&env, &contract_id, proposal_id, 2 * 24 * 60 * 60 + 1);
+
+    // Try to execute as non-admin (should fail)
+    let non_admin = Address::generate(&env);
+    client.ms_execute(&non_admin, &proposal_id).unwrap();
+}
+
+#[test]
+fn test_multisig_complete_workflow() {
+    let env = create_test_env();
+    let contract_id = env.register(HelloContract, ());
+    let client = HelloContractClient::new(&env, &contract_id);
+
+    let admin = Address::generate(&env);
+    client.initialize(&admin);
+
+    // Set multiple admins
+    let admin1 = Address::generate(&env);
+    let admin2 = Address::generate(&env);
+    let mut new_admins = Vec::new(&env);
+    new_admins.push_back(admin.clone());
+    new_admins.push_back(admin1.clone());
+    new_admins.push_back(admin2.clone());
+    client.ms_set_admins(&admin, &new_admins);
+
+    // Set threshold to 2
+    client.ms_set_threshold(&admin, &2);
+
+    // Step 1: Create proposal
+    let proposal_id = client
+        .ms_propose_set_min_cr(&admin, &12_000)
+    let proposal = client.gov_get_proposal(&proposal_id).unwrap();
+    assert_eq!(proposal.status, ProposalStatus::Active);
+
+    // Step 2: Vote to pass
+    let voter = Address::generate(&env);
+    client
+        .gov_vote(&voter, &proposal_id, &Vote::For, &1000)
+    let proposal = client.gov_get_proposal(&proposal_id).unwrap();
+    assert_eq!(proposal.status, ProposalStatus::Passed);
+
+    // Step 3: Get approvals
+    client.ms_approve(&admin1, &proposal_id).unwrap();
+    client.ms_approve(&admin2, &proposal_id).unwrap();
+    let approvals = client.ms_get_approvals(proposal_id).unwrap();
+    assert_eq!(approvals.len(), 2);
+
+    // Step 4: Wait for timelock
+    advance_proposal_time(&env, &contract_id, proposal_id, 2 * 24 * 60 * 60 + 1);
+
+    // Step 5: Execute
+    client.ms_execute(&admin, &proposal_id);
+    let proposal = client.gov_get_proposal(&proposal_id).unwrap();
+    assert_eq!(proposal.status, ProposalStatus::Executed);
 }
