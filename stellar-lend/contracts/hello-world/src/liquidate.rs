@@ -117,7 +117,7 @@ fn accrue_interest(env: &Env, position: &mut Position) -> Result<(), Liquidation
 fn get_asset_price(env: &Env, asset: &Address) -> i128 {
     // Try to get price from oracle, but fallback to default if not available
     // This allows liquidation to work even when prices aren't set up in tests
-    get_price(env, asset).unwrap_or_else(|_| 1_00000000i128) // Default: 1 XLM with 8 decimals
+    get_price(env, asset).unwrap_or(1_00000000i128) // Default: 1 XLM with 8 decimals
 }
 
 /// Calculate collateral value in debt asset terms
@@ -543,6 +543,7 @@ fn update_liquidation_analytics(
 }
 
 /// Emit liquidation event
+#[allow(clippy::too_many_arguments)]
 fn emit_liquidation_event(
     env: &Env,
     liquidator: &Address,
