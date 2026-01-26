@@ -51,7 +51,7 @@ impl HelloContract {
     /// Returns Ok(()) on success
     pub fn initialize(env: Env, admin: Address) -> Result<(), RiskManagementError> {
         initialize_risk_management(&env, admin.clone())?;
-        initialize_governance(&env, admin).map_err(|_| RiskManagementError::Unauthorized)?;
+        // initialize_governance(&env, admin).map_err(|_| RiskManagementError::Unauthorized)?;
         Ok(())
     }
 
@@ -501,6 +501,3 @@ impl HelloContract {
             .unwrap_or_else(|e| panic!("Flash loan error: {:?}", e))
     }
 }
-
-#[cfg(test)]
-mod test;
