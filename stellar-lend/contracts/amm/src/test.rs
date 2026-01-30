@@ -124,7 +124,7 @@ fn test_successful_swap() {
     // Register protocol with a pair
     let mut supported_pairs = Vec::new(&env);
     supported_pairs.push_back(TokenPair {
-        token_a: None,                         // Native XLM
+        token_a: None, // Native XLM
         token_b: Some(token_b.clone()),
         pool_address: Address::generate(&env),
     });
@@ -194,7 +194,7 @@ fn test_swap_failure_insufficient_output() {
 fn test_swap_failure_deadline_exceeded() {
     let env = Env::default();
     env.mock_all_auths();
-    
+
     // Set a known timestamp
     env.ledger().set(soroban_sdk::testutils::LedgerInfo {
         timestamp: 1000,
@@ -274,7 +274,7 @@ fn test_add_liquidity() {
     let token_b = Address::generate(&env);
 
     contract.initialize_amm_settings(&admin, &100, &1000, &10000);
-    
+
     let mut supported_pairs = Vec::new(&env);
     supported_pairs.push_back(TokenPair {
         token_a: None,
@@ -305,7 +305,7 @@ fn test_add_liquidity() {
     };
 
     let lp_tokens = contract.add_liquidity(&user, &params);
-    assert_eq!(lp_tokens, 10000); 
+    assert_eq!(lp_tokens, 10000);
 
     let history = contract.get_liquidity_history(&Some(user), &10).unwrap();
     assert_eq!(history.len(), 1);
@@ -356,7 +356,10 @@ fn test_remove_liquidity() {
 
     let history = contract.get_liquidity_history(&Some(user), &10).unwrap();
     assert_eq!(history.len(), 1);
-    assert_eq!(history.get(0).unwrap().operation_type, Symbol::new(&env, "remove"));
+    assert_eq!(
+        history.get(0).unwrap().operation_type,
+        Symbol::new(&env, "remove")
+    );
 }
 
 #[test]
@@ -397,7 +400,7 @@ fn test_auto_swap_for_collateral() {
     let token_out = Address::generate(&env);
 
     contract.initialize_amm_settings(&admin, &100, &1000, &10000);
-    
+
     let mut supported_pairs = Vec::new(&env);
     supported_pairs.push_back(TokenPair {
         token_a: None,
@@ -416,7 +419,7 @@ fn test_auto_swap_for_collateral() {
     contract.add_amm_protocol(&admin, &protocol_config);
 
     let amount_out = contract.auto_swap_for_collateral(&user, &Some(token_out), &15000);
-    assert_eq!(amount_out, 14850); 
+    assert_eq!(amount_out, 14850);
 }
 
 #[test]
@@ -552,7 +555,7 @@ fn test_multiple_protocol_selection() {
     let token_out = Address::generate(&env);
 
     contract.initialize_amm_settings(&admin, &100, &1000, &10000);
-    
+
     // Protocol 1: Disabled
     let protocol1 = Address::generate(&env);
     let mut config1 = create_test_protocol_config(&env, &protocol1);
@@ -586,7 +589,7 @@ fn test_multiple_protocol_selection() {
 
     // Should pick Protocol 3
     let amount_out = contract.auto_swap_for_collateral(&user, &Some(token_out), &15000);
-    assert_eq!(amount_out, 14850); 
+    assert_eq!(amount_out, 14850);
 }
 
 #[test]
@@ -709,7 +712,7 @@ fn test_callback_validation_success() {
     let token_b = Address::generate(&env);
 
     contract.initialize_amm_settings(&admin, &100, &1000, &10000);
-    
+
     let mut supported_pairs = Vec::new(&env);
     supported_pairs.push_back(TokenPair {
         token_a: None,
@@ -746,7 +749,7 @@ fn test_callback_validation_success() {
     // The callback_data sent TO the AMM during the swap has nonce 1.
     // The AMM calls validate_amm_callback with nonce 1.
     // validate_amm_callback checks if callback_data.nonce == expected (0 initially, wait...)
-    
+
     // Let's re-read generate_callback_nonce:
     // fn generate_callback_nonce(env: &Env, user: &Address) -> u64 {
     //    let current_nonce = storage.get(user).unwrap_or(0);
@@ -761,17 +764,17 @@ fn test_callback_validation_success() {
     //    if callback_data.nonce != expected_nonce { error }
     //    storage.set(user, expected_nonce + 1);
     // }
-    
+
     // There is a BUG in the contract logic:
     // execute_swap calls generate_callback_nonce which SETS the nonce to 1.
     // then it calls execute_amm_swap with nonce 1.
     // execute_amm_swap calls validate_amm_callback.
     // validate_amm_callback GETS the nonce (which is now 1) and compares it to callback_data.nonce (which is 1).
     // So it works, BUT then it increments it to 2.
-    
+
     // Wait, let me check the existing test `test_callback_validation`.
     // It says nonce 999 is wrong.
-    
+
     let callback_data = AmmCallbackData {
         nonce: 2, // Should be 2 now
         operation: Symbol::new(&env, "swap"),
@@ -795,7 +798,7 @@ fn test_edge_case_max_slippage() {
     let token_b = Address::generate(&env);
 
     contract.initialize_amm_settings(&admin, &100, &2000, &10000); // 20% max slippage allowed
-    
+
     let mut supported_pairs = Vec::new(&env);
     supported_pairs.push_back(TokenPair {
         token_a: None,
@@ -818,7 +821,7 @@ fn test_edge_case_max_slippage() {
         token_in: None,
         token_out: Some(token_b.clone()),
         amount_in: 10000,
-        min_amount_out: 1, // High slippage tolerance
+        min_amount_out: 1,        // High slippage tolerance
         slippage_tolerance: 2000, // 20%
         deadline: 2000,
     };

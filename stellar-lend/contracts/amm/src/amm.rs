@@ -514,12 +514,12 @@ pub fn validate_amm_callback(
     // Note: If called from execute_swap, the nonce was already incremented there.
     // However, validate_amm_callback is intended for the AMM to CALL BACK into our contract.
     // The current logic in execute_swap/add_liquidity/remove_liquidity ALREADY increments the nonce
-    // when preparing callback_data. 
+    // when preparing callback_data.
     // Wait, let's look at generate_callback_nonce: it increments and returns NEW nonce.
     // So if storage has 0, generate returns 1 and sets storage to 1.
     // Then validate_amm_callback gets 1, compares with 1, and sets to 2.
     // This is correct as it "consumes" the nonce for NEXT time.
-    
+
     env.storage()
         .persistent()
         .set(&nonce_key, &(expected_nonce + 1));
