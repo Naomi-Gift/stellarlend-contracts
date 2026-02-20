@@ -4816,6 +4816,11 @@ fn test_analytics_protocol_report_complete() {
     assert!(report.metrics.average_borrow_rate >= 0);
     // total_users and total_transactions are u64, always >= 0
     // timestamp is u64, always >= 0
+    // total_users and total_transactions are u32 - always valid
+    let _ = report.metrics.total_users;
+    let _ = report.metrics.total_transactions;
+    // timestamp is u64 - always valid
+    let _ = report.timestamp;
 }
 
 /// Test user report contains all required fields

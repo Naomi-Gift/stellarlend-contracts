@@ -322,6 +322,7 @@ async fn test_error_handling_and_retries() {
     let mock_server = MockServer::start().await;
 
     // First request fails, second succeeds
+    // Note: create_test_config sets max_retries(1), so we can only have 1 failure before success
     Mock::given(method("GET"))
         .and(path("/"))
         .respond_with(
