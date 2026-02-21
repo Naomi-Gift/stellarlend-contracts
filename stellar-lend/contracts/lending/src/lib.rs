@@ -7,6 +7,13 @@ use borrow::{
     BorrowError, CollateralPosition, DebtPosition,
 };
 
+mod data_store;
+
+pub use data_store::{DataStore, DataStoreClient, DataStoreError, StoreKey,
+    MAX_KEY_LEN, MAX_VALUE_LEN, MAX_ENTRIES, MAX_BACKUP_NAME};
+
+#[cfg(test)]
+mod data_store_test;
 #[cfg(test)]
 mod borrow_test;
 
