@@ -283,7 +283,14 @@ fn test_update_interest_rate_config_only_base_rate() {
     let (_id, admin, client) = setup(&e);
     // Bump base rate from 100 to 110 bps (+10 bps, well within 10 % of 100 = 10)
     client.update_interest_rate_config(
-        &admin, &Some(110_i128), &None, &None, &None, &None, &None, &None,
+        &admin,
+        &Some(110_i128),
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
     );
     // Borrow rate at 0 % utilization = base rate = 110 bps (floor may apply)
     let rate = client.get_borrow_rate();
@@ -297,7 +304,14 @@ fn test_update_interest_rate_config_only_kink() {
     let (_id, admin, client) = setup(&e);
     // kink: 8000 → 8800 (+10 %, valid)
     client.update_interest_rate_config(
-        &admin, &None, &Some(8_800_i128), &None, &None, &None, &None, &None,
+        &admin,
+        &None,
+        &Some(8_800_i128),
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
     );
     // If it doesn't panic the update succeeded.
 }
@@ -309,7 +323,14 @@ fn test_update_interest_rate_config_only_multiplier() {
     let (_id, admin, client) = setup(&e);
     // multiplier: 2000 → 2200 (+10 %, valid)
     client.update_interest_rate_config(
-        &admin, &None, &None, &Some(2_200_i128), &None, &None, &None, &None,
+        &admin,
+        &None,
+        &None,
+        &Some(2_200_i128),
+        &None,
+        &None,
+        &None,
+        &None,
     );
 }
 
@@ -320,7 +341,14 @@ fn test_update_interest_rate_config_only_jump_multiplier() {
     let (_id, admin, client) = setup(&e);
     // jump_multiplier: 10000 → 9000 (−10 %, valid)
     client.update_interest_rate_config(
-        &admin, &None, &None, &None, &Some(9_000_i128), &None, &None, &None,
+        &admin,
+        &None,
+        &None,
+        &None,
+        &Some(9_000_i128),
+        &None,
+        &None,
+        &None,
     );
 }
 
@@ -331,11 +359,21 @@ fn test_update_interest_rate_config_only_spread() {
     let (_id, admin, client) = setup(&e);
     // spread: 200 → 220 (+10 %, valid)
     client.update_interest_rate_config(
-        &admin, &None, &None, &None, &None, &None, &None, &Some(220_i128),
+        &admin,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &Some(220_i128),
     );
     let borrow_rate = client.get_borrow_rate();
     let supply_rate = client.get_supply_rate();
-    assert!(supply_rate <= borrow_rate, "supply rate must remain <= borrow rate after spread update");
+    assert!(
+        supply_rate <= borrow_rate,
+        "supply rate must remain <= borrow rate after spread update"
+    );
 }
 
 /// A non-admin caller must be rejected by `update_interest_rate_config`.
@@ -346,7 +384,14 @@ fn test_update_interest_rate_config_non_admin_panics() {
     let (_id, admin, client) = setup(&e);
     let attacker = other_addr(&e, &admin);
     client.update_interest_rate_config(
-        &attacker, &Some(110_i128), &None, &None, &None, &None, &None, &None,
+        &attacker,
+        &Some(110_i128),
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
     );
 }
 
@@ -365,7 +410,10 @@ fn test_set_emergency_rate_adjustment_positive() {
     let rate = client.get_borrow_rate();
     // At 0 % utilization: base_rate (100) + emergency (500) = 600, but capped at floor (50).
     // Rate must be >= floor (50 bps).
-    assert!(rate >= 50, "rate should be at least the floor after positive adjustment");
+    assert!(
+        rate >= 50,
+        "rate should be at least the floor after positive adjustment"
+    );
 }
 
 /// Admin can apply a negative emergency rate adjustment (rate reduction).
@@ -377,7 +425,10 @@ fn test_set_emergency_rate_adjustment_negative() {
     client.set_emergency_rate_adjustment(&admin, &-50_i128);
     let rate = client.get_borrow_rate();
     // Rate cannot go below the 50 bps floor.
-    assert!(rate >= 50, "rate should be clipped to floor after negative adjustment");
+    assert!(
+        rate >= 50,
+        "rate should be clipped to floor after negative adjustment"
+    );
 }
 
 /// Admin can reset the emergency adjustment to zero.
@@ -422,9 +473,9 @@ fn test_configure_oracle_all_params() {
     let (_id, admin, client) = setup(&e);
 
     let config = OracleConfig {
-        max_deviation_bps: 300,        // 3 % max deviation
-        max_staleness_seconds: 1_800,  // 30-minute staleness window
-        cache_ttl_seconds: 120,        // 2-minute cache
+        max_deviation_bps: 300,       // 3 % max deviation
+        max_staleness_seconds: 1_800, // 30-minute staleness window
+        cache_ttl_seconds: 120,       // 2-minute cache
         min_price: 1,
         max_price: 1_000_000_000_000,
     };
@@ -440,7 +491,7 @@ fn test_configure_oracle_tighter_staleness() {
 
     let config = OracleConfig {
         max_deviation_bps: 500,
-        max_staleness_seconds: 600,    // 10-minute staleness (tighter than default 1 h)
+        max_staleness_seconds: 600, // 10-minute staleness (tighter than default 1 h)
         cache_ttl_seconds: 60,
         min_price: 1,
         max_price: i128::MAX,
@@ -473,7 +524,7 @@ fn test_configure_oracle_zero_deviation_panics() {
     let e = env();
     let (_id, admin, client) = setup(&e);
     let config = OracleConfig {
-        max_deviation_bps: 0,  // invalid
+        max_deviation_bps: 0, // invalid
         max_staleness_seconds: 3_600,
         cache_ttl_seconds: 300,
         min_price: 1,
@@ -490,7 +541,7 @@ fn test_configure_oracle_zero_staleness_panics() {
     let (_id, admin, client) = setup(&e);
     let config = OracleConfig {
         max_deviation_bps: 500,
-        max_staleness_seconds: 0,  // invalid
+        max_staleness_seconds: 0, // invalid
         cache_ttl_seconds: 300,
         min_price: 1,
         max_price: i128::MAX,
@@ -689,11 +740,20 @@ fn test_admin_pauses_each_operation_individually() {
     let e = env();
     let (_id, admin, client) = setup(&e);
 
-    for op in &["pause_deposit", "pause_withdraw", "pause_borrow", "pause_repay", "pause_liquidate"]
-    {
+    for op in &[
+        "pause_deposit",
+        "pause_withdraw",
+        "pause_borrow",
+        "pause_repay",
+        "pause_liquidate",
+    ] {
         let sym = Symbol::new(&e, op);
         // Start unpaused
-        assert!(!client.is_operation_paused(&sym), "should start unpaused: {}", op);
+        assert!(
+            !client.is_operation_paused(&sym),
+            "should start unpaused: {}",
+            op
+        );
 
         // Pause
         client.set_pause_switch(&admin, &sym, &true);
@@ -701,7 +761,11 @@ fn test_admin_pauses_each_operation_individually() {
 
         // Unpause
         client.set_pause_switch(&admin, &sym, &false);
-        assert!(!client.is_operation_paused(&sym), "should be unpaused: {}", op);
+        assert!(
+            !client.is_operation_paused(&sym),
+            "should be unpaused: {}",
+            op
+        );
     }
 }
 

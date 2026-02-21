@@ -73,15 +73,23 @@ fn test_all_operations_unpaused_at_start() {
     let e = env();
     let (_id, _admin, client) = setup(&e);
 
-    for op in &["pause_deposit", "pause_withdraw", "pause_borrow", "pause_repay", "pause_liquidate"]
-    {
+    for op in &[
+        "pause_deposit",
+        "pause_withdraw",
+        "pause_borrow",
+        "pause_repay",
+        "pause_liquidate",
+    ] {
         assert!(
             !client.is_operation_paused(&Symbol::new(&e, op)),
             "{} must be unpaused at start",
             op
         );
     }
-    assert!(!client.is_emergency_paused(), "emergency pause must be OFF at start");
+    assert!(
+        !client.is_emergency_paused(),
+        "emergency pause must be OFF at start"
+    );
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -363,7 +371,10 @@ fn test_lift_emergency_pause_restores_deposit() {
     client.set_emergency_pause(&admin, &false);
 
     let balance = client.deposit_collateral(&user, &None, &2_000_i128);
-    assert_eq!(balance, 2_000, "deposit must succeed after lifting emergency pause");
+    assert_eq!(
+        balance, 2_000,
+        "deposit must succeed after lifting emergency pause"
+    );
 }
 
 /// Borrow is not gated by emergency pause, so it succeeds regardless.
@@ -379,7 +390,10 @@ fn test_lift_emergency_pause_borrow_unaffected() {
     client.set_emergency_pause(&admin, &false);
 
     let debt = client.borrow_asset(&user, &None, &1_000_i128);
-    assert!(debt > 0, "borrow must succeed (it is not gated by emergency pause)");
+    assert!(
+        debt > 0,
+        "borrow must succeed (it is not gated by emergency pause)"
+    );
 }
 
 /// After lifting emergency pause, `set_risk_params` must succeed again.
@@ -488,8 +502,13 @@ fn test_bulk_pause_blocks_all_specified_operations() {
 
     client.set_pause_switches(&admin, &map);
 
-    for op in &["pause_deposit", "pause_withdraw", "pause_borrow", "pause_repay", "pause_liquidate"]
-    {
+    for op in &[
+        "pause_deposit",
+        "pause_withdraw",
+        "pause_borrow",
+        "pause_repay",
+        "pause_liquidate",
+    ] {
         assert!(
             client.is_operation_paused(&Symbol::new(&e, op)),
             "{} must be paused after bulk pause",
@@ -577,8 +596,6 @@ fn test_set_emergency_pause_idempotent() {
 fn test_pause_state_persists_across_calls() {
     let e = env();
     let (_id, admin, client) = setup(&e);
-    let user = Address::generate(&e);
-
     pause_op(&client, &e, &admin, "pause_deposit");
 
     // Perform several other operations that do not touch deposit.
