@@ -26,6 +26,7 @@ use soroban_sdk::{contract, contractimpl, Address, Env, Map, String, Symbol};
 mod borrow;
 mod deposit;
 mod events;
+mod governance;
 mod repay;
 mod risk_management;
 mod withdraw;
@@ -765,3 +766,6 @@ mod tests;
 
 #[cfg(test)]
 mod flash_loan_test;
+
+#[cfg(test)]
+mod governance_test;
