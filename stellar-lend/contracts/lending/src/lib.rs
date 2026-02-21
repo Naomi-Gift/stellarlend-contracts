@@ -1,3 +1,12 @@
+//! # StellarLend Simplified Lending Contract
+//!
+//! A streamlined lending contract that provides basic borrow functionality
+//! with collateral requirements, debt ceilings, and interest accrual.
+//!
+//! This contract is a simplified version of the main lending protocol,
+//! suitable for single-asset lending scenarios with a fixed 5% APY
+//! interest rate and 150% minimum collateral ratio.
+
 #![no_std]
 use soroban_sdk::{contract, contractimpl, Address, Env};
 
