@@ -1,6 +1,7 @@
 pub mod admin_test;
 pub mod analytics_test;
 pub mod asset_config_test;
+pub mod config_test;
 pub mod deploy_test;
 pub mod edge_cases_test;
 pub mod events_test;

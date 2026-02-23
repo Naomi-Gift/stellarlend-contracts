@@ -63,6 +63,9 @@ use oracle::{
     OracleConfig,
 };
 
+mod config;
+use config::{config_backup, config_get, config_restore, config_set, ConfigError};
+
 mod flash_loan;
 use flash_loan::{
     configure_flash_loan, execute_flash_loan, repay_flash_loan, set_flash_loan_fee, FlashLoanConfig,
@@ -775,6 +778,67 @@ impl HelloContract {
         adjustment_bps: i128,
     ) -> Result<(), InterestRateError> {
         set_emergency_rate_adjustment(&env, caller, adjustment_bps)
+    }
+
+    /// Set a configuration value (admin only)
+    ///
+    /// # Arguments
+    /// * `caller` - The caller address (must be admin)
+    /// * `key` - The configuration key
+    /// * `value` - The configuration value
+    ///
+    /// # Returns
+    /// Returns Ok(()) on success
+    pub fn config_set(
+        env: Env,
+        caller: Address,
+        key: soroban_sdk::Symbol,
+        value: soroban_sdk::Val,
+    ) -> Result<(), ConfigError> {
+        config_set(&env, caller, key, value)
+    }
+
+    /// Get a configuration value
+    ///
+    /// # Arguments
+    /// * `key` - The configuration key
+    ///
+    /// # Returns
+    /// Returns Some(value) if the key exists, None otherwise
+    pub fn config_get(env: Env, key: soroban_sdk::Symbol) -> Option<soroban_sdk::Val> {
+        config_get(&env, key)
+    }
+
+    /// Backup configuration parameters (admin only)
+    ///
+    /// # Arguments
+    /// * `caller` - The caller address (must be admin)
+    /// * `keys` - A vector of configuration keys to backup
+    ///
+    /// # Returns
+    /// Returns a vector of key-value pairs representing the backup
+    pub fn config_backup(
+        env: Env,
+        caller: Address,
+        keys: soroban_sdk::Vec<soroban_sdk::Symbol>,
+    ) -> Result<soroban_sdk::Vec<(soroban_sdk::Symbol, soroban_sdk::Val)>, ConfigError> {
+        config_backup(&env, caller, keys)
+    }
+
+    /// Restore configuration parameters (admin only)
+    ///
+    /// # Arguments
+    /// * `caller` - The caller address (must be admin)
+    /// * `backup` - A vector of key-value pairs to restore
+    ///
+    /// # Returns
+    /// Returns Ok(()) on success
+    pub fn config_restore(
+        env: Env,
+        caller: Address,
+        backup: soroban_sdk::Vec<(soroban_sdk::Symbol, soroban_sdk::Val)>,
+    ) -> Result<(), ConfigError> {
+        config_restore(&env, caller, backup)
     }
 
     // ============================================================================
