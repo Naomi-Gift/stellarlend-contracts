@@ -27,3 +27,4 @@ pub mod multisig_test;
 pub mod multisig_governance_execution_test;
 pub mod cross_contract_test;
 pub mod config_snapshot_test;
+pub mod oracle_staleness_fallback_test;
