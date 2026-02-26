@@ -1,6 +1,6 @@
 #![allow(unused_variables)]
 
-use soroban_sdk::{token::TokenClient, Address, Env, String, Vec};
+use soroban_sdk::{token::TokenClient, Address, Env, String, Symbol, Val, Vec};
 
 use crate::errors::GovernanceError;
 use crate::storage::{GovernanceDataKey, GuardianConfig};
@@ -13,8 +13,8 @@ use crate::events::{
 };
 
 use crate::types::{
-    GovernanceConfig, MultisigConfig, Proposal, ProposalOutcome, ProposalStatus, ProposalType,
-    RecoveryRequest, VoteInfo, VoteType, BASIS_POINTS_SCALE, DEFAULT_EXECUTION_DELAY,
+    Action, GovernanceConfig, MultisigConfig, Proposal, ProposalOutcome, ProposalStatus, ProposalType,
+    RecoveryRequest, Vote, VoteInfo, VoteType, BASIS_POINTS_SCALE, DEFAULT_EXECUTION_DELAY,
     DEFAULT_QUORUM_BPS, DEFAULT_RECOVERY_PERIOD, DEFAULT_TIMELOCK_DURATION, DEFAULT_VOTING_PERIOD,
     DEFAULT_VOTING_THRESHOLD,
 };
@@ -424,14 +424,55 @@ pub fn execute_proposal(
     Ok(())
 }
 
-fn execute_proposal_type(_env: &Env, proposal_type: &ProposalType) -> Result<(), GovernanceError> {
+fn execute_proposal_type(env: &Env, proposal_type: &ProposalType) -> Result<(), GovernanceError> {
     match proposal_type {
-        ProposalType::MinCollateralRatio(_)
-        | ProposalType::RiskParams(_, _, _, _)
-        | ProposalType::PauseSwitch(_, _)
-        | ProposalType::EmergencyPause(_)
-        | ProposalType::GenericAction(_) => Ok(()),
+        ProposalType::MinCollateralRatio(val) => {
+            crate::risk_params::set_risk_params(env, Some(*val), None, None, None)
+                .map_err(|_| GovernanceError::ExecutionFailed)?;
+        }
+        ProposalType::RiskParams(min_cr, liq_threshold, close_factor, liq_incentive) => {
+            crate::risk_params::set_risk_params(
+                env,
+                *min_cr,
+                *liq_threshold,
+                *close_factor,
+                *liq_incentive,
+            )
+            .map_err(|_| GovernanceError::ExecutionFailed)?;
+        }
+        ProposalType::AssetConfigUpdate(asset, cf, lt, ms, mb, cc, cb) => {
+            crate::cross_asset::update_asset_config(
+                env,
+                asset.clone(),
+                *cf,
+                *lt,
+                *ms,
+                *mb,
+                *cc,
+                *cb,
+            )
+            .map_err(|_| GovernanceError::ExecutionFailed)?;
+        }
+        ProposalType::PauseSwitch(op, paused) => {
+            let admin = env.current_contract_address();
+            crate::risk_management::set_pause_switch(env, admin, op.clone(), *paused)
+                .map_err(|_| GovernanceError::ExecutionFailed)?;
+        }
+        ProposalType::EmergencyPause(paused) => {
+            let admin = env.current_contract_address();
+            crate::risk_management::set_emergency_pause(env, admin, *paused)
+                .map_err(|_| GovernanceError::ExecutionFailed)?;
+        }
+        ProposalType::GenericAction(action) => {
+            execute_generic_action(env, action)?;
+        }
     }
+    Ok(())
+}
+
+fn execute_generic_action(env: &Env, action: &Action) -> Result<(), GovernanceError> {
+    env.invoke_contract::<Val>(&action.target, &action.method, action.args.clone());
+    Ok(())
 }
 
 // ========================================================================
@@ -977,8 +1018,54 @@ pub fn emit_recovery_executed_event(
 ) {
     let topics = (
         Symbol::new(env, "recovery_executed"),
-        old_admin.clone(),
-        new_admin.clone(),
+        old_admin,
+        new_admin,
+        executor,
     );
-    env.events().publish(topics, executor.clone());
+    env.events().publish(topics, ());
+}
+
+// Wrapper functions for multisig operations to maintain compatibility
+pub fn get_multisig_admins(env: &Env) -> Option<Vec<Address>> {
+    crate::multisig::get_ms_admins(env)
+}
+
+pub fn get_multisig_threshold(env: &Env) -> u32 {
+    crate::multisig::get_ms_threshold(env)
+}
+
+pub fn get_guardian_config(env: &Env) -> Option<GuardianConfig> {
+    crate::storage::get_guardian_config(env)
+}
+
+pub fn get_recovery_request(env: &Env) -> Option<RecoveryRequest> {
+    crate::storage::get_recovery_request(env)
+}
+
+pub fn get_recovery_approvals(env: &Env) -> Option<Vec<Address>> {
+    crate::storage::get_recovery_approvals(env)
+}
+
+pub fn get_proposals(env: &Env, start_id: u64, limit: u32) -> Vec<Proposal> {
+    crate::storage::get_proposals(env, start_id, limit)
+}
+
+pub fn can_vote(env: &Env, voter: Address, proposal_id: u64) -> bool {
+    crate::storage::can_vote(env, voter, proposal_id)
+}
+
+pub fn set_multisig_admins(env: &Env, caller: Address, admins: Vec<Address>, threshold: u32) -> Result<(), GovernanceError> {
+    crate::multisig::ms_set_admins(env, caller, admins, threshold)
+}
+
+pub fn set_multisig_threshold(env: &Env, caller: Address, threshold: u32) -> Result<(), GovernanceError> {
+    crate::multisig::set_ms_threshold(env, caller, threshold)
+}
+
+pub fn execute_multisig_proposal(env: &Env, executor: Address, proposal_id: u64) -> Result<(), GovernanceError> {
+    crate::multisig::ms_execute(env, executor, proposal_id)
+}
+
+pub fn propose_set_min_collateral_ratio(env: &Env, proposer: Address, new_ratio: u32) -> Result<u64, GovernanceError> {
+    crate::multisig::ms_propose_set_min_cr(env, proposer, new_ratio.into())
 }

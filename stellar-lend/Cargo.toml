@@ -4,6 +4,7 @@ members = [
   "client",
   "contracts/amm",
   "contracts/bridge",
+  "contracts/common",
   "contracts/lending",
 ]
 

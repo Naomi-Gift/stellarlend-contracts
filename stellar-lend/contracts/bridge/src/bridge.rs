@@ -1,7 +1,8 @@
 #![allow(unused_variables)]
 use soroban_sdk::{
     contract, contracterror, contractevent, contractimpl, contracttype, log, symbol_short, Address,
-    Env, String, Symbol, Vec, I256,
+    BytesN, Env, String, Symbol, Vec, I256,
+    BytesN, Env, Env, String, String, Symbol, Symbol, Vec, Vec, I256,
 };
 
 // ── Error type ────────────────────────────────────────────────────────────────
@@ -391,5 +392,70 @@ impl BridgeContract {
             .div(&I256::from_i128(&env, 10000))
             .to_i128()
             .unwrap_or(0)
+    }
+
+    // ── Upgrade Management ────────────────────────────────────────────────────
+
+    pub fn upgrade_init(
+        env: Env,
+        admin: Address,
+        current_wasm_hash: BytesN<32>,
+        required_approvals: u32,
+    ) {
+        stellarlend_common::upgrade::UpgradeManager::init(
+            env,
+            admin,
+            current_wasm_hash,
+            required_approvals,
+        );
+    }
+
+    pub fn upgrade_add_approver(env: Env, caller: Address, approver: Address) {
+        stellarlend_common::upgrade::UpgradeManager::add_approver(env, caller, approver);
+    }
+
+    pub fn upgrade_remove_approver(env: Env, caller: Address, approver: Address) {
+        stellarlend_common::upgrade::UpgradeManager::remove_approver(env, caller, approver);
+    }
+
+    pub fn upgrade_propose(
+        env: Env,
+        caller: Address,
+        new_wasm_hash: BytesN<32>,
+        new_version: u32,
+    ) -> u64 {
+        stellarlend_common::upgrade::UpgradeManager::upgrade_propose(
+            env,
+            caller,
+            new_wasm_hash,
+            new_version,
+        )
+    }
+
+    pub fn upgrade_approve(env: Env, caller: Address, proposal_id: u64) -> u32 {
+        stellarlend_common::upgrade::UpgradeManager::upgrade_approve(env, caller, proposal_id)
+    }
+
+    pub fn upgrade_execute(env: Env, caller: Address, proposal_id: u64) {
+        stellarlend_common::upgrade::UpgradeManager::upgrade_execute(env, caller, proposal_id);
+    }
+
+    pub fn upgrade_rollback(env: Env, caller: Address, proposal_id: u64) {
+        stellarlend_common::upgrade::UpgradeManager::upgrade_rollback(env, caller, proposal_id);
+    }
+
+    pub fn upgrade_status(
+        env: Env,
+        proposal_id: u64,
+    ) -> stellarlend_common::upgrade::UpgradeStatus {
+        stellarlend_common::upgrade::UpgradeManager::upgrade_status(env, proposal_id)
+    }
+
+    pub fn current_wasm_hash(env: Env) -> BytesN<32> {
+        stellarlend_common::upgrade::UpgradeManager::current_wasm_hash(env)
+    }
+
+    pub fn current_version(env: Env) -> u32 {
+        stellarlend_common::upgrade::UpgradeManager::current_version(env)
     }
 }

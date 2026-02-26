@@ -268,6 +268,7 @@ name = "bridge"
 version = "0.0.0"
 dependencies = [
  "soroban-sdk",
+ "stellarlend-common",
 ]
 
 [[package]]
@@ -2464,6 +2465,7 @@ version = "0.1.0"
 dependencies = [
  "soroban-sdk",
  "soroban-token-sdk",
+ "stellarlend-common",
 ]
 
 [[package]]
@@ -2492,11 +2494,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "stellarlend-common"
+version = "0.1.0"
+dependencies = [
+ "soroban-sdk",
+]
+
+[[package]]
 name = "stellarlend-lending"
 version = "0.1.0"
 dependencies = [
  "soroban-sdk",
  "soroban-token-sdk",
+ "stellarlend-common",
 ]
 
 [[package]]

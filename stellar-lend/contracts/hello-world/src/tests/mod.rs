@@ -25,6 +25,12 @@ pub mod oracle_test;
 // pub mod test_helpers;
 // Legacy API mismatch with current contract surface.
 // pub mod withdraw_test;
+pub mod pause_test;
+pub mod risk_params_test;
+pub mod security_test;
+pub mod test;
+pub mod test_helpers;
+pub mod withdraw_test;
 // Cross-asset tests disabled - contract methods not yet implemented
 // Legacy API mismatch with current contract surface.
 // pub mod views_test;
@@ -34,5 +40,13 @@ pub mod oracle_test;
 // pub mod bridge_test;
 // pub mod cross_contract_test;
 // pub mod multisig_governance_execution_test;
+pub mod amm_impact_test;
+pub mod borrow_cap_test;
+pub mod bridge_test;
+pub mod cross_contract_test;
+pub mod config_snapshot_test;
+pub mod oracle_staleness_fallback_test;
+pub mod gov_asset_test;
+pub mod multisig_governance_execution_test;
 pub mod multisig_test;
 pub mod recovery_test;
