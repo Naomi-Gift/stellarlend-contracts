@@ -339,4 +339,6 @@ impl AmmContract {
 #[cfg(all(test, feature = "liquidate_integration"))]
 mod liquidate_test;
 #[cfg(test)]
+mod math_safety_test;
+#[cfg(test)]
 mod test;

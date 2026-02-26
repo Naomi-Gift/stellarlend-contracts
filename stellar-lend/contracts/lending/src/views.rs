@@ -9,7 +9,7 @@
 //! - Collateral and debt values depend on the oracle; ensure the oracle is correct and trusted.
 //! - Health factor uses the admin-set liquidation threshold consistently.
 
-use soroban_sdk::{contracttype, Address, Env, IntoVal, Symbol};
+use soroban_sdk::{contracttype, Address, Env, IntoVal, Symbol, I256};
 
 use crate::borrow::{
     get_liquidation_threshold_bps, get_oracle, get_user_collateral, get_user_debt,
@@ -63,7 +63,7 @@ fn get_asset_price(env: &Env, oracle: &Address, asset: &Address) -> i128 {
 /// Computes collateral value in common unit (amount * price / PRICE_SCALE).
 /// Returns 0 if oracle is not set or amount is zero.
 #[inline]
-fn collateral_value(env: &Env, collateral: &BorrowCollateral) -> i128 {
+pub(crate) fn collateral_value(env: &Env, collateral: &BorrowCollateral) -> i128 {
     if collateral.amount <= 0 {
         return 0;
     }
@@ -74,17 +74,17 @@ fn collateral_value(env: &Env, collateral: &BorrowCollateral) -> i128 {
     if price <= 0 {
         return 0;
     }
-    collateral
-        .amount
-        .checked_mul(price)
-        .and_then(|v| v.checked_div(PRICE_SCALE))
-        .unwrap_or(0)
+    let amount_256 = I256::from_i128(env, collateral.amount);
+    let price_256 = I256::from_i128(env, price);
+    let scale_256 = I256::from_i128(env, PRICE_SCALE);
+    let val_256 = amount_256.mul(&price_256).div(&scale_256);
+    val_256.to_i128().unwrap_or(0)
 }
 
 /// Computes debt value in common unit (total debt * price / PRICE_SCALE).
 /// Returns 0 if oracle is not set or debt is zero.
 #[inline]
-fn debt_value(env: &Env, position: &DebtPosition) -> i128 {
+pub(crate) fn debt_value(env: &Env, position: &DebtPosition) -> i128 {
     let total_debt = position
         .borrowed_amount
         .checked_add(position.interest_accrued)
@@ -99,10 +99,11 @@ fn debt_value(env: &Env, position: &DebtPosition) -> i128 {
     if price <= 0 {
         return 0;
     }
-    total_debt
-        .checked_mul(price)
-        .and_then(|v| v.checked_div(PRICE_SCALE))
-        .unwrap_or(0)
+    let debt_256 = I256::from_i128(env, total_debt);
+    let price_256 = I256::from_i128(env, price);
+    let scale_256 = I256::from_i128(env, PRICE_SCALE);
+    let val_256 = debt_256.mul(&price_256).div(&scale_256);
+    val_256.to_i128().unwrap_or(0)
 }
 
 /// Computes health factor from collateral value, debt value, and liquidation threshold.
@@ -113,7 +114,7 @@ fn debt_value(env: &Env, position: &DebtPosition) -> i128 {
 /// Returns `HEALTH_FACTOR_NO_DEBT` when debt is zero (position is healthy).
 /// Returns 0 when oracle is not set but user has debt (cannot compute).
 #[inline]
-fn compute_health_factor(
+pub(crate) fn compute_health_factor(
     env: &Env,
     collateral_value: i128,
     debt_value: i128,
@@ -129,14 +130,15 @@ fn compute_health_factor(
         return 0;
     };
     let bps = get_liquidation_threshold_bps(env);
-    let weighted_collateral = collateral_value
-        .checked_mul(bps)
-        .and_then(|v| v.checked_div(10000))
-        .unwrap_or(0);
-    weighted_collateral
-        .checked_mul(HEALTH_FACTOR_SCALE)
-        .and_then(|v| v.checked_div(debt_value))
-        .unwrap_or(0)
+    let collat_256 = I256::from_i128(env, collateral_value);
+    let bps_256 = I256::from_i128(env, bps);
+    let hf_scale_256 = I256::from_i128(env, HEALTH_FACTOR_SCALE);
+    let debt_256 = I256::from_i128(env, debt_value);
+
+    let weighted_collateral = collat_256.mul(&bps_256).div(&I256::from_i128(env, 10000));
+
+    let hf_256 = weighted_collateral.mul(&hf_scale_256).div(&debt_256);
+    hf_256.to_i128().unwrap_or(0)
 }
 
 // ═══════════════════════════════════════════════════════════════════════════

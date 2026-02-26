@@ -308,6 +308,64 @@ fn risk_params_multiple_steps_within_change_limit() {
 }
 
 // =============================================================================
+// BONUS BOUNDS AND DISCOUNT CONFIGURATION TESTS (#366)
+// =============================================================================
+
+/// Ensure that negative effective discount (negative incentive) is rejected.
+/// The parameter change validation limits changes to 10%, which implicitly catches
+/// any attempt to change a positive default to a negative number.
+#[test]
+#[should_panic(expected = "Error(Contract, #3)")]
+fn risk_params_negative_liquidation_incentive() {
+    let env = create_test_env();
+    let (_cid, admin, client) = setup(&env);
+    
+    // Attempting to set an incentive of -100 basis points
+    // This will trigger ParameterChangeTooLarge since 1000 -> -100 exceeds 10% max change 
+    client.set_risk_params(&admin, &None, &None, &None, &Some(-100));
+}
+
+/// Test setting liquidation incentive exactly beyond max allowed (50%) to trigger InvalidLiquidationIncentive (#7).
+/// This ensures the parameter cannot be configured to economically unsafe values.
+#[test]
+#[should_panic(expected = "Error(Contract, #7)")]
+fn risk_params_unsafe_high_incentive() {
+    let env = create_test_env();
+    let (cid, admin, client) = setup(&env);
+    
+    // Bypass parameter change limit by directly modifying storage to 5000 (max valid)
+    env.as_contract(&cid, || {
+        let config_key = crate::risk_params::RiskParamsDataKey::RiskParamsConfig;
+        let mut config: crate::risk_params::RiskParams = env.storage().persistent().get(&config_key).unwrap();
+        config.liquidation_incentive = 5_000;
+        env.storage().persistent().set(&config_key, &config);
+    });
+
+    // Now current is 5000. 10% max change limit allows up to 500 change.
+    // Setting to 5500 is within change limit, but safely triggers InvalidLiquidationIncentive (7) max bound check.
+    client.set_risk_params(&admin, &None, &None, &None, &Some(5_500));
+}
+
+/// Test setting close factor exactly beyond max allowed (100%) to trigger InvalidCloseFactor (#6).
+#[test]
+#[should_panic(expected = "Error(Contract, #6)")]
+fn risk_params_unsafe_high_close_factor() {
+    let env = create_test_env();
+    let (cid, admin, client) = setup(&env);
+    
+    // Bypass parameter change limit by directly modifying storage to 10000 (max valid)
+    env.as_contract(&cid, || {
+        let config_key = crate::risk_params::RiskParamsDataKey::RiskParamsConfig;
+        let mut config: crate::risk_params::RiskParams = env.storage().persistent().get(&config_key).unwrap();
+        config.close_factor = 10_000;
+        env.storage().persistent().set(&config_key, &config);
+    });
+
+    // Setting to 11000 triggers InvalidCloseFactor (6) max bound check.
+    client.set_risk_params(&admin, &None, &None, &Some(11_000), &None);
+}
+
+// =============================================================================
 // ENFORCEMENT: require_min_collateral_ratio, can_be_liquidated, close_factor, incentive
 // =============================================================================
 

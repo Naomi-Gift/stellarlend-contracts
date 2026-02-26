@@ -28,11 +28,16 @@ use token_receiver::receive as receive_impl;
 
 mod views;
 use views::{
-    get_collateral_balance, get_collateral_value, get_debt_balance, get_debt_value,
-    get_health_factor, get_user_position, UserPositionSummary,
+    get_collateral_balance as view_collateral_balance,
+    get_collateral_value as view_collateral_value, get_debt_balance as view_debt_balance,
+    get_debt_value as view_debt_value, get_health_factor as view_health_factor,
+    get_user_position as view_user_position, UserPositionSummary,
 };
 
-use withdraw::{initialize_withdraw_settings, set_withdraw_paused, WithdrawError};
+use withdraw::{
+    initialize_withdraw_settings as initialize_withdraw_logic,
+    set_withdraw_paused as set_withdraw_paused_logic, withdraw as withdraw_logic, WithdrawError,
+};
 mod data_store;
 use stellarlend_common::upgrade;
 pub use stellarlend_common::upgrade::{UpgradeError, UpgradeStage, UpgradeStatus};
@@ -52,6 +57,8 @@ mod views_test;
 
 #[cfg(test)]
 mod data_store_test;
+#[cfg(test)]
+mod math_safety_test;
 #[cfg(test)]
 mod upgrade_test;
 #[cfg(test)]
@@ -181,32 +188,32 @@ impl LendingContract {
 
     /// Returns the user's collateral balance (raw amount).
     pub fn get_collateral_balance(env: Env, user: Address) -> i128 {
-        get_collateral_balance(&env, &user)
+        view_collateral_balance(&env, &user)
     }
 
     /// Returns the user's debt balance (principal + accrued interest).
     pub fn get_debt_balance(env: Env, user: Address) -> i128 {
-        get_debt_balance(&env, &user)
+        view_debt_balance(&env, &user)
     }
 
     /// Returns the user's collateral value in common unit (e.g. USD 8 decimals). 0 if oracle not set.
     pub fn get_collateral_value(env: Env, user: Address) -> i128 {
-        get_collateral_value(&env, &user)
+        view_collateral_value(&env, &user)
     }
 
     /// Returns the user's debt value in common unit. 0 if oracle not set.
     pub fn get_debt_value(env: Env, user: Address) -> i128 {
-        get_debt_value(&env, &user)
+        view_debt_value(&env, &user)
     }
 
     /// Returns health factor (scaled 10000 = 1.0). Above 10000 = healthy; below = liquidatable.
     pub fn get_health_factor(env: Env, user: Address) -> i128 {
-        get_health_factor(&env, &user)
+        view_health_factor(&env, &user)
     }
 
     /// Returns full position summary: collateral/debt balances and values, and health factor.
     pub fn get_user_position(env: Env, user: Address) -> UserPositionSummary {
-        get_user_position(&env, &user)
+        view_user_position(&env, &user)
     }
 
     /// Set oracle address for price feeds (admin only).
@@ -264,7 +271,6 @@ impl LendingContract {
     ) -> DepositCollateral {
         get_deposit_collateral_impl(&env, &user, &asset)
     }
-
     /// Get protocol admin
     pub fn get_admin(env: Env) -> Option<Address> {
         get_protocol_admin(&env)
@@ -298,7 +304,7 @@ impl LendingContract {
         if is_paused(&env, PauseType::Withdraw) {
             return Err(withdraw::WithdrawError::WithdrawPaused);
         }
-        withdraw::withdraw(&env, user, asset, amount)
+        withdraw_logic(&env, user, asset, amount)
     }
 
     /// Initialize withdraw settings (admin only)
@@ -378,5 +384,14 @@ impl LendingContract {
 
     pub fn current_version(env: Env) -> u32 {
         upgrade::UpgradeManager::current_version(env)
+    }
+  
+    /// Initialize borrow settings (admin only)
+    pub fn initialize_borrow_settings(
+        env: Env,
+        debt_ceiling: i128,
+        min_borrow_amount: i128,
+    ) -> Result<(), BorrowError> {
+        initialize_borrow_logic(&env, debt_ceiling, min_borrow_amount)
     }
 }

@@ -724,6 +724,23 @@ fn test_accrued_interest_time_backwards() {
     assert_eq!(interest, 0);
 }
 
+/// Test accrued interest with extreme values triggering overflow
+#[test]
+fn test_accrued_interest_extreme_overflow() {
+    // Principal: i128::MAX
+    // Rate: 10000 bps (100% annual)
+    // Time: 100 years
+    let principal = i128::MAX;
+    let rate_bps = 10000;
+    let last_accrual = 0;
+    let current_time = 100 * SECONDS_PER_YEAR;
+
+    let result = calculate_accrued_interest(principal, last_accrual, current_time, rate_bps);
+    
+    // Should return Overflow error instead of panicking
+    assert!(result.is_err());
+}
+
 // =============================================================================
 // RATE TRANSITION TESTS
 // =============================================================================

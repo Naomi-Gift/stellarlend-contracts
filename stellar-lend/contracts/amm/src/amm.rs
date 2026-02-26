@@ -14,7 +14,7 @@
 
 #![allow(unused)]
 use soroban_sdk::{
-    contracterror, contractevent, contracttype, Address, Env, IntoVal, Map, Symbol, Val, Vec,
+    contracterror, contractevent, contracttype, Address, Env, IntoVal, Map, Symbol, Val, Vec, I256,
 };
 
 /// Errors that can occur during AMM operations
@@ -482,7 +482,7 @@ pub fn remove_liquidity(
         &user,
         Symbol::new(env, "remove_liquidity"),
         lp_tokens,
-        amount_a + amount_b,
+        amount_a.saturating_add(amount_b),
     );
 
     Ok((amount_a, amount_b))
@@ -588,7 +588,11 @@ pub fn auto_swap_for_collateral(
         amount_in: amount,
         min_amount_out: calculate_min_output_with_slippage(amount, settings.default_slippage)?,
         slippage_tolerance: settings.default_slippage,
-        deadline: env.ledger().timestamp() + 300, // 5 minutes
+        deadline: env
+            .ledger()
+            .timestamp()
+            .checked_add(300)
+            .ok_or(AmmError::SlippageExceeded)?, // 5 minutes
     };
 
     // Execute the swap
@@ -714,35 +718,48 @@ fn generate_callback_nonce(env: &Env, user: &Address) -> u64 {
 }
 
 /// Calculate effective price
-fn calculate_effective_price(amount_in: i128, amount_out: i128) -> Result<i128, AmmError> {
+pub(crate) fn calculate_effective_price(
+    amount_in: i128,
+    amount_out: i128,
+) -> Result<i128, AmmError> {
     if amount_in == 0 {
         return Err(AmmError::InvalidSwapParams);
     }
 
-    // Price = (amount_out / amount_in) * 10^18 for precision
-    let price = (amount_out * 1_000_000_000_000_000_000i128)
-        .checked_div(amount_in)
+    let price = amount_out
+        .checked_mul(1_000_000_000_000_000_000i128)
+        .and_then(|v| v.checked_div(amount_in))
         .ok_or(AmmError::Overflow)?;
 
     Ok(price)
 }
 
 /// Calculate swap fees
-fn calculate_swap_fees(
+pub(crate) fn calculate_swap_fees(
     protocol_config: &AmmProtocolConfig,
     amount_in: i128,
 ) -> Result<i128, AmmError> {
-    let fees = (amount_in * protocol_config.fee_tier)
-        .checked_div(10_000)
+    let fees = amount_in
+        .checked_mul(protocol_config.fee_tier)
+        .and_then(|v| v.checked_div(10_000))
         .ok_or(AmmError::Overflow)?;
     Ok(fees)
 }
 
 /// Calculate minimum output with slippage
-fn calculate_min_output_with_slippage(amount: i128, slippage_bps: i128) -> Result<i128, AmmError> {
-    let slippage_factor = 10_000 - slippage_bps;
-    let min_output = (amount * slippage_factor)
-        .checked_div(10_000)
+pub(crate) fn calculate_min_output_with_slippage(
+    amount: i128,
+    slippage_bps: i128,
+) -> Result<i128, AmmError> {
+    if slippage_bps > 10_000 {
+        return Err(AmmError::InvalidSwapParams);
+    }
+    let slippage_factor = 10_000i128
+        .checked_sub(slippage_bps)
+        .ok_or(AmmError::Overflow)?;
+    let min_output = amount
+        .checked_mul(slippage_factor)
+        .and_then(|v| v.checked_div(10_000))
         .ok_or(AmmError::Overflow)?;
     Ok(min_output)
 }
@@ -789,9 +806,13 @@ fn execute_amm_swap(
 ) -> Result<i128, AmmError> {
     // Mock implementation - in reality, this would call the AMM protocol contract
     // For now, we'll simulate a successful swap with some slippage
-    let slippage_factor = 10_000 - params.slippage_tolerance;
-    let amount_out = (params.amount_in * slippage_factor)
-        .checked_div(10_000)
+    let slippage_factor = 10_000i128
+        .checked_sub(params.slippage_tolerance)
+        .ok_or(AmmError::Overflow)?;
+    let amount_out = params
+        .amount_in
+        .checked_mul(slippage_factor)
+        .and_then(|v| v.checked_div(10_000))
         .ok_or(AmmError::Overflow)?;
 
     // Validate callback (this would be called by the AMM protocol)
@@ -807,7 +828,11 @@ fn execute_amm_add_liquidity(
     callback_data: &AmmCallbackData,
 ) -> Result<i128, AmmError> {
     // Mock implementation
-    let lp_tokens = (params.amount_a + params.amount_b) / 2; // Simplified calculation
+    let lp_tokens = params
+        .amount_a
+        .checked_add(params.amount_b)
+        .and_then(|v| v.checked_div(2))
+        .ok_or(AmmError::Overflow)?; // Simplified calculation
 
     // Validate callback
     validate_amm_callback(env, params.protocol.clone(), callback_data.clone())?;

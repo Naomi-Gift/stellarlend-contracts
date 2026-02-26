@@ -1,3 +1,4 @@
+pub mod access_control_regression_test;
 pub mod admin_test;
 pub mod test_helpers;
 pub mod analytics_test;

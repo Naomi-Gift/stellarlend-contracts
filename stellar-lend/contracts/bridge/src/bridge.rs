@@ -2,6 +2,7 @@
 use soroban_sdk::{
     contract, contracterror, contractevent, contractimpl, contracttype, log, symbol_short, Address,
     BytesN, Env, String, Symbol, Vec,
+    Env, String, Symbol, Vec, I256,
 };
 
 // ── Error type ────────────────────────────────────────────────────────────────
@@ -22,6 +23,7 @@ pub enum ContractError {
     NegativeMinAmount = 10,
     AmountNotPositive = 11,
     AmountBelowMinimum = 12,
+    Overflow = 13,
 }
 
 #[contractevent]
@@ -282,10 +284,13 @@ impl BridgeContract {
             return Err(ContractError::AmountBelowMinimum);
         }
 
-        let fee = Self::compute_fee(amount, cfg.fee_bps);
-        let net = amount - fee;
+        let fee = Self::compute_fee(env.clone(), amount, cfg.fee_bps);
+        let net = amount.checked_sub(fee).ok_or(ContractError::Overflow)?;
 
-        cfg.total_deposited += amount;
+        cfg.total_deposited = cfg
+            .total_deposited
+            .checked_add(amount)
+            .ok_or(ContractError::Overflow)?;
         Self::save_bridge(&env, &bridge_id, &cfg);
 
         BridgeDepositEvent {
@@ -329,7 +334,10 @@ impl BridgeContract {
             return Err(ContractError::AmountBelowMinimum);
         }
 
-        cfg.total_withdrawn += amount;
+        cfg.total_withdrawn = cfg
+            .total_withdrawn
+            .checked_add(amount)
+            .ok_or(ContractError::Overflow)?;
         Self::save_bridge(&env, &bridge_id, &cfg);
 
         BridgeWithdrawalEvent {
@@ -375,8 +383,15 @@ impl BridgeContract {
         Self::load_admin(&env)
     }
 
-    pub fn compute_fee(amount: i128, fee_bps: u64) -> i128 {
-        amount * fee_bps as i128 / 10_000
+    pub fn compute_fee(env: Env, amount: i128, fee_bps: u64) -> i128 {
+        let amount_256 = I256::from_i128(&env, amount);
+        let bps_256 = I256::from_i128(&env, fee_bps as i128);
+
+        amount_256
+            .mul(&bps_256)
+            .div(&I256::from_i128(&env, 10000))
+            .to_i128()
+            .unwrap_or(0)
     }
 
     // ── Upgrade Management ────────────────────────────────────────────────────
