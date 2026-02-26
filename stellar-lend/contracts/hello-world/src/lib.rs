@@ -1395,7 +1395,6 @@ impl HelloContract {
     // ============================================================================
     // Governance Query Functions
     // ============================================================================
-<<<<<<< test/cross-asset-borrow-repay-edge-cases
     // CROSS-ASSET OPERATIONS
     // ============================================================================
 
@@ -1517,7 +1516,6 @@ impl HelloContract {
     }
 
     // ============================================================================
-=======
 
     /// Get proposal by ID
     pub fn gov_get_proposal(env: Env, proposal_id: u64) -> Option<Proposal> {
@@ -1628,7 +1626,6 @@ impl HelloContract {
     ) -> Result<i128, BridgeError> {
         bridge_withdraw(&env, user, network_id, asset, amount)
     }
->>>>>>> main
 }
 
 #[cfg(test)]
