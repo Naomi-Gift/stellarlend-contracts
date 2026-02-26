@@ -8,9 +8,9 @@
 //! - Partial repayment scenarios
 //! - Health factor updates during multi-asset operations
 
+use crate::cross_asset::AssetConfig;
 use crate::{HelloContract, HelloContractClient};
 use soroban_sdk::{testutils::Address as _, Address, Env};
-use crate::cross_asset::AssetConfig;
 
 // ============================================================================
 // TEST HELPERS
@@ -68,14 +68,23 @@ fn create_custom_asset_config(
 
 fn setup_three_assets(env: &Env, client: &HelloContractClient) -> (Address, Address, Address) {
     let usdc = Address::generate(env);
-    client.initialize_asset(&Some(usdc.clone()), &create_asset_config(env, Some(usdc.clone()), 1_0000000));
-    
+    client.initialize_asset(
+        &Some(usdc.clone()),
+        &create_asset_config(env, Some(usdc.clone()), 1_0000000),
+    );
+
     let eth = Address::generate(env);
-    client.initialize_asset(&Some(eth.clone()), &create_asset_config(env, Some(eth.clone()), 2000_0000000));
-    
+    client.initialize_asset(
+        &Some(eth.clone()),
+        &create_asset_config(env, Some(eth.clone()), 2000_0000000),
+    );
+
     let btc = Address::generate(env);
-    client.initialize_asset(&Some(btc.clone()), &create_asset_config(env, Some(btc.clone()), 40000_0000000));
-    
+    client.initialize_asset(
+        &Some(btc.clone()),
+        &create_asset_config(env, Some(btc.clone()), 40000_0000000),
+    );
+
     (usdc, eth, btc)
 }
 
@@ -205,8 +214,18 @@ fn test_sequential_borrows_different_assets() {
     assert!(capacity2 < capacity1);
 
     // Verify both debts exist
-    assert_eq!(client.get_user_asset_position(&user, &Some(usdc)).debt_principal, 20000_0000000);
-    assert_eq!(client.get_user_asset_position(&user, &Some(eth)).debt_principal, 5_0000000);
+    assert_eq!(
+        client
+            .get_user_asset_position(&user, &Some(usdc))
+            .debt_principal,
+        20000_0000000
+    );
+    assert_eq!(
+        client
+            .get_user_asset_position(&user, &Some(eth))
+            .debt_principal,
+        5_0000000
+    );
 }
 
 // ============================================================================
@@ -247,8 +266,18 @@ fn test_partial_repay_multiple_assets() {
     // Partially repay ETH
     client.ca_repay_debt(&user, &Some(eth.clone()), &3_0000000);
 
-    assert_eq!(client.get_user_asset_position(&user, &Some(usdc)).debt_principal, 20000_0000000);
-    assert_eq!(client.get_user_asset_position(&user, &Some(eth)).debt_principal, 7_0000000);
+    assert_eq!(
+        client
+            .get_user_asset_position(&user, &Some(usdc))
+            .debt_principal,
+        20000_0000000
+    );
+    assert_eq!(
+        client
+            .get_user_asset_position(&user, &Some(eth))
+            .debt_principal,
+        7_0000000
+    );
 }
 
 #[test]
@@ -265,8 +294,18 @@ fn test_repay_one_asset_fully_keep_others() {
     // Fully repay USDC
     client.ca_repay_debt(&user, &Some(usdc.clone()), &20000_0000000);
 
-    assert_eq!(client.get_user_asset_position(&user, &Some(usdc)).debt_principal, 0);
-    assert_eq!(client.get_user_asset_position(&user, &Some(eth)).debt_principal, 10_0000000);
+    assert_eq!(
+        client
+            .get_user_asset_position(&user, &Some(usdc))
+            .debt_principal,
+        0
+    );
+    assert_eq!(
+        client
+            .get_user_asset_position(&user, &Some(eth))
+            .debt_principal,
+        10_0000000
+    );
 
     let summary = client.get_user_position_summary(&user);
     assert_eq!(summary.total_debt_value, 20000_0000000); // Only ETH debt remains
@@ -485,11 +524,17 @@ fn test_borrow_with_different_collateral_factors() {
 
     // High collateral factor asset (90%)
     let stable = Address::generate(&env);
-    client.initialize_asset(&Some(stable.clone()), &create_custom_asset_config(&env, Some(stable.clone()), 1_0000000, 9000, 8000));
+    client.initialize_asset(
+        &Some(stable.clone()),
+        &create_custom_asset_config(&env, Some(stable.clone()), 1_0000000, 9000, 8000),
+    );
 
     // Low collateral factor asset (50%)
     let volatile = Address::generate(&env);
-    client.initialize_asset(&Some(volatile.clone()), &create_custom_asset_config(&env, Some(volatile.clone()), 1000_0000000, 5000, 8000));
+    client.initialize_asset(
+        &Some(volatile.clone()),
+        &create_custom_asset_config(&env, Some(volatile.clone()), 1000_0000000, 5000, 8000),
+    );
 
     // Deposit both
     client.ca_deposit_collateral(&user, &Some(stable.clone()), &10000_0000000);
@@ -531,7 +576,7 @@ fn test_borrow_capacity_updates_correctly() {
     let (usdc, eth, _btc) = setup_three_assets(&env, &client);
 
     client.ca_deposit_collateral(&user, &Some(usdc.clone()), &20000_0000000);
-    
+
     let summary1 = client.get_user_position_summary(&user);
     let initial_capacity = summary1.borrow_capacity;
 
@@ -668,7 +713,7 @@ fn test_very_small_amounts() {
 
     // Deposit tiny amount
     client.ca_deposit_collateral(&user, &Some(usdc.clone()), &100);
-    
+
     // Borrow tiny amount
     client.ca_borrow_asset(&user, &Some(usdc.clone()), &70);
 
@@ -686,9 +731,9 @@ fn test_very_large_amounts() {
 
     // Use large but reasonable amount (within max_supply cap)
     let large_amount = 50_000_000_000_000;
-    
+
     client.ca_deposit_collateral(&user, &Some(usdc.clone()), &large_amount);
-    
+
     let borrow_amount = (large_amount * 75) / 100;
     client.ca_borrow_asset(&user, &Some(usdc.clone()), &borrow_amount);
 
@@ -807,7 +852,15 @@ fn test_disable_asset_borrowing_prevents_new_borrows() {
     client.ca_deposit_collateral(&user, &Some(usdc.clone()), &10000_0000000);
 
     // Disable borrowing for USDC
-    client.update_asset_config(&Some(usdc.clone()), &None, &None, &None, &None, &None, &Some(false));
+    client.update_asset_config(
+        &Some(usdc.clone()),
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &Some(false),
+    );
 
     // This should fail
     let result = client.try_ca_borrow_asset(&user, &Some(usdc), &1000_0000000);
@@ -825,7 +878,15 @@ fn test_repay_still_works_after_borrow_disabled() {
     client.ca_borrow_asset(&user, &Some(usdc.clone()), &5000_0000000);
 
     // Disable borrowing
-    client.update_asset_config(&Some(usdc.clone()), &None, &None, &None, &None, &None, &Some(false));
+    client.update_asset_config(
+        &Some(usdc.clone()),
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &Some(false),
+    );
 
     // Repay should still work
     client.ca_repay_debt(&user, &Some(usdc.clone()), &2500_0000000);
@@ -879,7 +940,7 @@ fn test_position_summary_consistency() {
     // Verify calculations
     // Collateral: $30k + $20k + $40k = $90k
     assert_eq!(summary.total_collateral_value, 90000_0000000);
-    
+
     // Debt: $20k + $10k = $30k
     assert_eq!(summary.total_debt_value, 30000_0000000);
 
@@ -889,4 +950,3 @@ fn test_position_summary_consistency() {
     // Health factor: 67.5k / 24k = 2.8125 (28125)
     assert!(summary.health_factor > 20000);
 }
-
