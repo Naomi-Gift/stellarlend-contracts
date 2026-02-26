@@ -1021,7 +1021,7 @@ impl HelloContract {
 }
 
 #[cfg(test)]
-mod test;
+mod tests;
 
 #[cfg(test)]
 mod test_reentrancy;
@@ -1031,3 +1031,12 @@ mod test_zero_amount;
 
 #[cfg(test)]
 mod flash_loan_test;
+
+#[cfg(test)]
+mod fuzz_tests;
+
+#[cfg(test)]
+mod governance_test;
+
+#[cfg(test)]
+mod monitor_test;
