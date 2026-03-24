@@ -4,6 +4,7 @@
 //! validation, debt tracking, interest calculation, and pause controls.
 //!
 //! [Issue #391] Optimized gas usage by migrating protocol settings to Instance storage.
+#![allow(unexpected_cfgs)]
 
 use crate::pause::{self, blocks_high_risk_ops, PauseType};
 use soroban_sdk::{contracterror, contractevent, contracttype, Address, Env, I256};
