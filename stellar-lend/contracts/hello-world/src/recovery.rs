@@ -147,6 +147,8 @@ pub fn start_recovery(
     old_admin: Address,
     new_admin: Address,
 ) -> Result<(), GovernanceError> {
+    initiator.require_auth();
+
     let guardians: Vec<Address> = env
         .storage()
         .persistent()
@@ -189,6 +191,8 @@ pub fn start_recovery(
 }
 
 pub fn approve_recovery(env: &Env, approver: Address) -> Result<(), GovernanceError> {
+    approver.require_auth();
+
     let guardians: Vec<Address> = env
         .storage()
         .persistent()
@@ -233,6 +237,8 @@ pub fn approve_recovery(env: &Env, approver: Address) -> Result<(), GovernanceEr
 }
 
 pub fn execute_recovery(env: &Env, executor: Address) -> Result<(), GovernanceError> {
+    executor.require_auth();
+
     let recovery: RecoveryRequest = env
         .storage()
         .persistent()
@@ -259,7 +265,20 @@ pub fn execute_recovery(env: &Env, executor: Address) -> Result<(), GovernanceEr
         .get(&GovernanceDataKey::RecoveryApprovals)
         .unwrap_or_else(|| Vec::new(env));
 
-    if approvals.len() < threshold {
+    let guardians: Vec<Address> = env
+        .storage()
+        .persistent()
+        .get(&GovernanceDataKey::Guardians)
+        .unwrap_or_else(|| Vec::new(env));
+
+    let mut valid_approvals = 0;
+    for approval in approvals.iter() {
+        if guardians.contains(approval) {
+            valid_approvals += 1;
+        }
+    }
+
+    if valid_approvals < threshold {
         return Err(GovernanceError::InsufficientApprovals);
     }
 
