@@ -863,3 +863,330 @@ fn test_swap_failure_unauthorized() {
     let result = contract.try_execute_swap(&user, &params);
     assert!(result.is_err());
 }
+
+#[test]
+fn test_delete_amm_protocol() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let contract = create_amm_contract(&env);
+    let admin = Address::generate(&env);
+
+    contract.initialize_amm_settings(&admin, &100, &1000, &10000);
+    let protocol_config = create_test_protocol_config(&env);
+    let protocol_addr = protocol_config.protocol_address.clone();
+    contract.add_amm_protocol(&admin, &protocol_config);
+
+    // Verify it exists
+    assert!(contract.get_amm_protocols().unwrap().contains_key(protocol_addr.clone()));
+
+    // Delete it
+    contract.delete_amm_protocol(&admin, &protocol_addr);
+
+    // Verify it's gone
+    assert!(!contract.get_amm_protocols().unwrap().contains_key(protocol_addr));
+}
+
+#[test]
+fn test_validate_amm_callback_failures() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let contract = create_amm_contract(&env);
+    let admin = Address::generate(&env);
+    let user = Address::generate(&env);
+
+    contract.initialize_amm_settings(&admin, &100, &1000, &10000);
+    let protocol_config = create_test_protocol_config(&env);
+    let protocol_addr = protocol_config.protocol_address.clone();
+    contract.add_amm_protocol(&admin, &protocol_config);
+
+    // Get a valid nonce first (simulated by calling execute_swap or manually)
+    // Actually, we can just guess. 
+    // The contract expects nonce to match current session.
+
+    // 1. Wrong Operation
+    let callback_data_wrong_op = AmmCallbackData {
+        nonce: 1,
+        operation: Symbol::new(&env, "wrong"),
+        user: user.clone(),
+        expected_amounts: Vec::new(&env),
+        deadline: env.ledger().timestamp() + 3600,
+    };
+    assert!(contract.try_validate_amm_callback(&protocol_addr, &callback_data_wrong_op).is_err());
+
+    // 2. Expired callback
+    let callback_data_expired = AmmCallbackData {
+        nonce: 1,
+        operation: Symbol::new(&env, "swap"),
+        user: user.clone(),
+        expected_amounts: Vec::new(&env),
+        deadline: env.ledger().timestamp() - 1,
+    };
+    assert!(contract.try_validate_amm_callback(&protocol_addr, &callback_data_expired).is_err());
+}
+
+#[test]
+fn test_calculate_effective_price_zero() {
+    // This tests the library function directly or via a wrapper if exposed
+    // Since it's pub(crate), we can test it in a test module in amm.rs or here if visible.
+    // In Soroban tests, we can call it if it's in the same crate.
+    let result = calculate_effective_price(0, 100);
+    assert!(result.is_err());
+}
+
+#[test]
+fn test_remove_liquidity_edge_cases() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let contract = create_amm_contract(&env);
+    let admin = Address::generate(&env);
+    let user = Address::generate(&env);
+    let protocol_addr = env.register(MockAmm, ());
+    let token_b = Address::generate(&env);
+
+    contract.initialize_amm_settings(&admin, &100, &1000, &10000);
+    
+    let mut supported_pairs = Vec::new(&env);
+    supported_pairs.push_back(TokenPair {
+        token_a: None,
+        token_b: Some(token_b.clone()),
+        pool_address: Address::generate(&env),
+    });
+    let protocol_config = AmmProtocolConfig {
+        protocol_address: protocol_addr.clone(),
+        protocol_name: Symbol::new(&env, "TestAMM"),
+        enabled: true,
+        fee_tier: 30,
+        min_swap_amount: 1000,
+        max_swap_amount: 1_000_000_000,
+        supported_pairs,
+    };
+    contract.add_amm_protocol(&admin, &protocol_config);
+
+    // 1. Zero LP tokens
+    let result = contract.try_remove_liquidity(
+        &user, &protocol_addr, &None, &Some(token_b.clone()), &0, &100, &100, &2000
+    );
+    assert!(result.is_err());
+
+    // 2. Expired deadline
+    env.ledger().set_timestamp(1000);
+    let result = contract.try_remove_liquidity(
+        &user, &protocol_addr, &None, &Some(token_b.clone()), &1000, &100, &100, &999
+    );
+    assert!(result.is_err());
+}
+
+#[test]
+fn test_update_amm_settings_individual() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let contract = create_amm_contract(&env);
+    let admin = Address::generate(&env);
+
+    contract.initialize_amm_settings(&admin, &100, &1000, &10000);
+    
+    let mut settings = contract.get_amm_settings().unwrap();
+    settings.default_slippage = 150;
+    contract.update_amm_settings(&admin, &settings);
+    assert_eq!(contract.get_amm_settings().unwrap().default_slippage, 150);
+
+    settings.swap_enabled = false;
+    contract.update_amm_settings(&admin, &settings);
+    assert!(!contract.get_amm_settings().unwrap().swap_enabled);
+}
+
+#[test]
+fn test_swap_failure_when_paused() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let contract = create_amm_contract(&env);
+    let admin = Address::generate(&env);
+    let user = Address::generate(&env);
+
+    contract.initialize_amm_settings(&admin, &100, &1000, &10000);
+    let mut settings = contract.get_amm_settings().unwrap();
+    settings.swap_enabled = false;
+    contract.update_amm_settings(&admin, &settings);
+
+    let params = SwapParams {
+        protocol: Address::generate(&env),
+        token_in: None,
+        token_out: Some(Address::generate(&env)),
+        amount_in: 10000,
+        min_amount_out: 5000,
+        slippage_tolerance: 100,
+        deadline: 2000,
+    };
+
+    let result = contract.try_execute_swap(&user, &params);
+    assert!(result.is_err());
+}
+
+#[test]
+fn test_add_liquidity_zero_amounts() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let contract = create_amm_contract(&env);
+    let admin = Address::generate(&env);
+    let user = Address::generate(&env);
+
+    contract.initialize_amm_settings(&admin, &100, &1000, &10000);
+    let protocol_config = create_test_protocol_config(&env);
+    let protocol_addr = protocol_config.protocol_address.clone();
+    contract.add_amm_protocol(&admin, &protocol_config);
+
+    let params = LiquidityParams {
+        protocol: protocol_addr.clone(),
+        token_a: None,
+        token_b: protocol_config.supported_pairs.get(0).unwrap().token_b,
+        amount_a: 0,
+        amount_b: 1000,
+        min_amount_a: 0,
+        min_amount_b: 0,
+        deadline: env.ledger().timestamp() + 3600,
+    };
+    let result = contract.try_add_liquidity(&user, &params);
+    assert!(result.is_err());
+}
+
+#[test]
+fn test_add_liquidity_expired_deadline() {
+    let env = Env::default();
+    env.mock_all_auths();
+    env.ledger().set_timestamp(5000);
+
+    let contract = create_amm_contract(&env);
+    let admin = Address::generate(&env);
+    let user = Address::generate(&env);
+
+    contract.initialize_amm_settings(&admin, &100, &1000, &10000);
+    let protocol_config = create_test_protocol_config(&env);
+    let protocol_addr = protocol_config.protocol_address.clone();
+    contract.add_amm_protocol(&admin, &protocol_config);
+
+    let params = LiquidityParams {
+        protocol: protocol_addr.clone(),
+        token_a: None,
+        token_b: protocol_config.supported_pairs.get(0).unwrap().token_b,
+        amount_a: 10000,
+        amount_b: 10000,
+        min_amount_a: 5000,
+        min_amount_b: 5000,
+        deadline: 4000, // Before current timestamp (5000)
+    };
+    let result = contract.try_add_liquidity(&user, &params);
+    assert!(result.is_err());
+}
+
+#[test]
+fn test_liquidity_failure_when_paused() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let contract = create_amm_contract(&env);
+    let admin = Address::generate(&env);
+    let user = Address::generate(&env);
+
+    contract.initialize_amm_settings(&admin, &100, &1000, &10000);
+    let mut settings = contract.get_amm_settings().unwrap();
+    settings.liquidity_enabled = false;
+    contract.update_amm_settings(&admin, &settings);
+
+    let params = LiquidityParams {
+        protocol: Address::generate(&env),
+        token_a: None,
+        token_b: Some(Address::generate(&env)),
+        amount_a: 10000,
+        amount_b: 10000,
+        min_amount_a: 5000,
+        min_amount_b: 5000,
+        deadline: env.ledger().timestamp() + 3600,
+    };
+
+    let result = contract.try_add_liquidity(&user, &params);
+    assert!(result.is_err());
+}
+
+#[test]
+fn test_swap_with_max_amount_exceeded() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let contract = create_amm_contract(&env);
+    let admin = Address::generate(&env);
+    let user = Address::generate(&env);
+
+    contract.initialize_amm_settings(&admin, &100, &1000, &10000);
+    let mut protocol_config = create_test_protocol_config(&env);
+    protocol_config.max_swap_amount = 5000;
+    let protocol_addr = protocol_config.protocol_address.clone();
+    contract.add_amm_protocol(&admin, &protocol_config);
+
+    let params = SwapParams {
+        protocol: protocol_addr.clone(),
+        token_in: None,
+        token_out: protocol_config.supported_pairs.get(0).unwrap().token_b,
+        amount_in: 10000, // exceeds max of 5000
+        min_amount_out: 1000,
+        slippage_tolerance: 100,
+        deadline: env.ledger().timestamp() + 3600,
+    };
+
+    let result = contract.try_execute_swap(&user, &params);
+    assert!(result.is_err());
+}
+
+#[test]
+fn test_get_swap_history_empty() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let contract = create_amm_contract(&env);
+    let admin = Address::generate(&env);
+    let user = Address::generate(&env);
+
+    contract.initialize_amm_settings(&admin, &100, &1000, &10000);
+
+    let history = contract.get_swap_history(&Some(user), &10);
+    // Should return None or empty
+    assert!(history.is_none() || history.unwrap().is_empty());
+}
+
+#[test]
+fn test_get_liquidity_history_empty() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let contract = create_amm_contract(&env);
+    let admin = Address::generate(&env);
+    let user = Address::generate(&env);
+
+    contract.initialize_amm_settings(&admin, &100, &1000, &10000);
+
+    let history = contract.get_liquidity_history(&Some(user), &10);
+    assert!(history.is_none() || history.unwrap().is_empty());
+}
+
+#[test]
+fn test_calculate_min_output_with_slippage_valid() {
+    // Normal case: 10000 with 100 bps (1%) slippage -> 9900
+    let result = calculate_min_output_with_slippage(10000, 100).unwrap();
+    assert_eq!(result, 9900);
+
+    // 0 bps slippage -> full amount
+    let result = calculate_min_output_with_slippage(10000, 0).unwrap();
+    assert_eq!(result, 10000);
+}
+
+#[test]
+fn test_calculate_effective_price_normal() {
+    // 10000 in, 9900 out -> price = 9900 * 10^18 / 10000
+    let result = calculate_effective_price(10000, 9900).unwrap();
+    assert_eq!(result, 990_000_000_000_000_000i128);
+}
