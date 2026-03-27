@@ -8,9 +8,24 @@
 //! contracts. Each protocol has its own configuration including fee tiers,
 //! supported token pairs, and swap limits.
 //!
-//! ## Callback Validation
-//! Uses nonce-based replay protection: each user has an incrementing nonce
-//! stored on-chain. Callbacks must present the expected nonce to be accepted.
+//! ## Callback validation
+//!
+//! Each [`AmmCallbackData::user`] has a monotonic nonce in persistent storage
+//! ([`AmmDataKey::CallbackNonces`]). A callback must match the stored value,
+//! then the nonce advances (with checked arithmetic) so the same payload cannot
+//! be replayed.
+//!
+//! **Trust boundaries**
+//! - `validate_amm_callback` is intended for **external** AMM contracts that
+//!   call back into this router. It requires [`Address::require_auth`] on
+//!   `caller` so arbitrary accounts cannot spoof a registered protocol address.
+//! - Internal mock execution paths call `validate_amm_callback_core` only: the
+//!   real invoker is this contract, not the protocol. When wiring a production
+//!   AMM, invoke the protocol from the router and rely on the protocol’s
+//!   callback to `validate_amm_callback`; remove the internal core call from
+//!   the mock path to avoid double-consuming the nonce.
+//! - Admin-only configuration: [`initialize_amm_settings`], [`add_amm_protocol`],
+//!   [`update_amm_settings`] (admin identity is checked against stored admin).
 
 #![allow(unused)]
 use soroban_sdk::{
@@ -211,19 +226,23 @@ pub struct LiquidityRecord {
     pub timestamp: u64,
 }
 
-/// AMM callback data for validation
+/// AMM callback payload for validation.
+///
+/// The `operation` field is informational for integrators (swap vs liquidity);
+/// validation does not branch on it. Binding expected amounts to execution is
+/// left to future protocol-specific hooks.
 #[contracttype]
 #[derive(Clone, Debug, PartialEq)]
 pub struct AmmCallbackData {
-    /// Callback nonce for replay protection
+    /// Monotonic per-user nonce; must match stored value before it advances.
     pub nonce: u64,
-    /// Operation type
+    /// Operation label (e.g. swap, add_liquidity); informational only.
     pub operation: Symbol,
-    /// User address
+    /// End user whose nonce bucket is updated.
     pub user: Address,
-    /// Expected amounts
+    /// Expected amounts for the operation (protocol-defined layout).
     pub expected_amounts: Vec<i128>,
-    /// Deadline
+    /// Expiry timestamp (ledger seconds). Valid while `ledger_timestamp <= deadline`.
     pub deadline: u64,
 }
 
@@ -269,7 +288,7 @@ pub fn execute_swap(env: &Env, user: Address, params: SwapParams) -> Result<i128
     validate_token_pair(env, &protocol_config, &params.token_in, &params.token_out)?;
 
     // Generate callback nonce for validation
-    let nonce = generate_callback_nonce(env, &user);
+    let nonce = generate_callback_nonce(env, &user)?;
 
     // Prepare callback data
     let callback_data = AmmCallbackData {
@@ -343,7 +362,7 @@ pub fn add_liquidity(env: &Env, user: Address, params: LiquidityParams) -> Resul
     validate_token_pair(env, &protocol_config, &params.token_a, &params.token_b)?;
 
     // Generate callback nonce
-    let nonce = generate_callback_nonce(env, &user);
+    let nonce = generate_callback_nonce(env, &user)?;
 
     // Prepare callback data
     let callback_data = AmmCallbackData {
@@ -427,7 +446,7 @@ pub fn remove_liquidity(
     validate_token_pair(env, &protocol_config, &token_a, &token_b)?;
 
     // Generate callback nonce
-    let nonce = generate_callback_nonce(env, &user);
+    let nonce = generate_callback_nonce(env, &user)?;
 
     // Prepare callback data
     let callback_data = AmmCallbackData {
@@ -488,35 +507,40 @@ pub fn remove_liquidity(
     Ok((amount_a, amount_b))
 }
 
-/// Validate AMM callback
+/// Validates callback nonce, expiry, and protocol registration without requiring
+/// `caller` authorization.
 ///
-/// Validates callbacks from AMM protocols to ensure they are legitimate
-/// and prevent replay attacks.
+/// Used by the mock AMM execution path inside this contract. External AMM
+/// protocols should call [`validate_amm_callback`] instead.
 ///
 /// # Arguments
-/// * `env` - The Soroban environment
-/// * `caller` - The AMM protocol making the callback
-/// * `callback_data` - The callback data to validate
+/// * `caller` — Registered protocol address; must match a stored entry with
+///   [`AmmProtocolConfig::enabled`] set.
 ///
-/// # Returns
-/// Returns Ok(()) if callback is valid
-pub fn validate_amm_callback(
+/// # Errors
+/// * [`AmmError::UnsupportedProtocol`] — `caller` is not registered.
+/// * [`AmmError::InvalidCallback`] — protocol disabled, deadline passed, or
+///   nonce mismatch (replay).
+/// * [`AmmError::Overflow`] — nonce increment would overflow `u64`.
+///
+/// # Security
+/// Does **not** verify caller identity; only [`validate_amm_callback`] applies
+/// [`Address::require_auth`] for external callbacks.
+fn validate_amm_callback_core(
     env: &Env,
-    caller: Address,
-    callback_data: AmmCallbackData,
+    caller: &Address,
+    callback_data: &AmmCallbackData,
 ) -> Result<(), AmmError> {
-    // Verify caller is a registered AMM protocol
-    let protocols = get_amm_protocols(env)?;
-    if !protocols.contains_key(caller.clone()) {
+    let protocol_config = get_amm_protocol_config(env, caller)?;
+    if !protocol_config.enabled {
         return Err(AmmError::InvalidCallback);
     }
 
-    // Check deadline
-    if env.ledger().timestamp() > callback_data.deadline {
+    let now = env.ledger().timestamp();
+    if now > callback_data.deadline {
         return Err(AmmError::InvalidCallback);
     }
 
-    // Validate nonce to prevent replay attacks
     let nonce_key = AmmDataKey::CallbackNonces(callback_data.user.clone());
     let expected_nonce = env
         .storage()
@@ -528,24 +552,40 @@ pub fn validate_amm_callback(
         return Err(AmmError::InvalidCallback);
     }
 
-    // Increment nonce to prevent reuse
-    // Note: If called from execute_swap, the nonce was already incremented there.
-    // However, validate_amm_callback is intended for the AMM to CALL BACK into our contract.
-    // The current logic in execute_swap/add_liquidity/remove_liquidity ALREADY increments the nonce
-    // when preparing callback_data.
-    // Wait, let's look at generate_callback_nonce: it increments and returns NEW nonce.
-    // So if storage has 0, generate returns 1 and sets storage to 1.
-    // Then validate_amm_callback gets 1, compares with 1, and sets to 2.
-    // This is correct as it "consumes" the nonce for NEXT time.
+    let next_nonce = expected_nonce
+        .checked_add(1)
+        .ok_or(AmmError::Overflow)?;
+    env.storage().persistent().set(&nonce_key, &next_nonce);
 
-    env.storage()
-        .persistent()
-        .set(&nonce_key, &(expected_nonce + 1));
-
-    // Emit callback validation event
-    emit_callback_validated_event(env, &caller, &callback_data);
+    emit_callback_validated_event(env, caller, callback_data);
 
     Ok(())
+}
+
+/// Validates an AMM callback from a registered, enabled protocol.
+///
+/// The `caller` must be the protocol contract address and must authorize this
+/// invocation via [`Address::require_auth`] so third parties cannot spoof a
+/// registered protocol.
+///
+/// # Arguments
+/// * `caller` — AMM protocol contract address (must match stored config).
+///
+/// # Errors
+/// * Authorization failure if `caller` has not authorized this call.
+/// * Same as [`validate_amm_callback_core`] for protocol, deadline, nonce, and
+///   overflow.
+///
+/// # Security
+/// Trust boundary: only a registered protocol that signs `caller` can
+/// advance a user’s nonce. Nonce replay and expired deadlines are rejected.
+pub fn validate_amm_callback(
+    env: &Env,
+    caller: Address,
+    callback_data: AmmCallbackData,
+) -> Result<(), AmmError> {
+    caller.require_auth();
+    validate_amm_callback_core(env, &caller, &callback_data)
 }
 
 /// Auto-swap for collateral optimization
@@ -703,8 +743,8 @@ fn validate_token_pair(
     Err(AmmError::InvalidTokenPair)
 }
 
-/// Generate callback nonce for validation
-fn generate_callback_nonce(env: &Env, user: &Address) -> u64 {
+/// Allocates the next nonce for `user` (checked `u64` increment).
+fn generate_callback_nonce(env: &Env, user: &Address) -> Result<u64, AmmError> {
     let nonce_key = AmmDataKey::CallbackNonces(user.clone());
     let current_nonce = env
         .storage()
@@ -712,9 +752,9 @@ fn generate_callback_nonce(env: &Env, user: &Address) -> u64 {
         .get::<AmmDataKey, u64>(&nonce_key)
         .unwrap_or(0);
 
-    let new_nonce = current_nonce + 1;
+    let new_nonce = current_nonce.checked_add(1).ok_or(AmmError::Overflow)?;
     env.storage().persistent().set(&nonce_key, &new_nonce);
-    new_nonce
+    Ok(new_nonce)
 }
 
 /// Calculate effective price
@@ -815,8 +855,8 @@ fn execute_amm_swap(
         .and_then(|v| v.checked_div(10_000))
         .ok_or(AmmError::Overflow)?;
 
-    // Validate callback (this would be called by the AMM protocol)
-    validate_amm_callback(env, params.protocol.clone(), callback_data.clone())?;
+    // Simulates the callback the external AMM would invoke; see module docs.
+    validate_amm_callback_core(env, &params.protocol, callback_data)?;
 
     Ok(amount_out)
 }
@@ -834,8 +874,7 @@ fn execute_amm_add_liquidity(
         .and_then(|v| v.checked_div(2))
         .ok_or(AmmError::Overflow)?; // Simplified calculation
 
-    // Validate callback
-    validate_amm_callback(env, params.protocol.clone(), callback_data.clone())?;
+    validate_amm_callback_core(env, &params.protocol, callback_data)?;
 
     Ok(lp_tokens)
 }
@@ -856,8 +895,7 @@ fn execute_amm_remove_liquidity(
     let amount_a = lp_tokens; // Simplified
     let amount_b = lp_tokens; // Simplified
 
-    // Validate callback
-    validate_amm_callback(env, protocol.clone(), callback_data.clone())?;
+    validate_amm_callback_core(env, protocol, callback_data)?;
 
     Ok((amount_a, amount_b))
 }

@@ -235,20 +235,23 @@ impl AmmContract {
         )
     }
 
-    /// Validate AMM callback
+    /// Validate an AMM protocol callback (nonce + expiry + registered caller).
     ///
-    /// Validates callbacks from AMM protocols to ensure they are legitimate
-    /// and prevent replay attacks. This is called by AMM protocols during operations.
+    /// The `caller` address must authorize this invocation via Soroban auth
+    /// (`require_auth`). Internal router execution uses a separate path that
+    /// does not require protocol auth; see the `stellarlend_amm` crate docs.
     ///
     /// # Arguments
-    /// * `caller` - The AMM protocol making the callback
-    /// * `callback_data` - The callback data to validate
+    /// * `caller` — Registered AMM protocol contract address
+    /// * `callback_data` — Nonce, user, deadline, and operation metadata
     ///
-    /// # Returns
-    /// Returns Ok(()) if callback is valid
+    /// # Errors
+    /// * Auth failure if `caller` did not authorize this call
+    /// * `AmmError::InvalidCallback` for disabled protocol, expired deadline, or bad nonce
+    /// * `AmmError::Overflow` if the nonce counter would overflow
     ///
     /// # Events
-    /// Emits callback_validated event
+    /// Emits `callback_validated` on success
     pub fn validate_amm_callback(
         env: Env,
         caller: Address,

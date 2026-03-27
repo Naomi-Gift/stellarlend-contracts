@@ -30,10 +30,18 @@ This contract provides Automated Market Maker (AMM) integration for the StellarL
 ## Security Features
 
 - Slippage protection with configurable tolerances
-- Callback validation with nonce-based replay protection
+- Callback validation with nonce-based replay protection and deadline (expiry) checks
 - Admin-only configuration functions
 - Comprehensive parameter validation
-- Emergency pause functionality integration
+- Emergency pause functionality integration (`swap_enabled` / `liquidity_enabled` in settings)
+
+## Trust Boundaries
+
+- **Admin**: `initialize_amm_settings`, `add_amm_protocol`, and `update_amm_settings` configure the router. The stored `Admin` address must match the caller for updates (see contract implementation).
+- **Registered AMM protocols**: Only addresses present in the protocol map may participate. Each entry includes an `enabled` flag; disabled protocols cannot complete callbacks.
+- **`validate_amm_callback`**: Intended for **external** AMM contracts calling back into this router. The `caller` argument must **authorize** the invocation (Soroban `require_auth` on the protocol address) so arbitrary users cannot spoof a registered protocol. Validation checks: registered + enabled protocol, `ledger_timestamp <= deadline`, and a per-user monotonic nonce (replay attempts fail after the first successful consume).
+- **Internal mock execution**: The bundled mock path validates callbacks via the same nonce and deadline rules but **without** requiring protocol auth, because the router invokes itself during tests/simulation. Integrating a real on-chain AMM should route through the external protocol contract and use `validate_amm_callback` from there; remove redundant internal validation to avoid consuming the nonce twice.
+- **Tokens**: This crate’s mock swap/liquidity logic does not perform actual token transfers; production integrations must compose token contracts and allowance flows separately.
 
 ## Events
 
