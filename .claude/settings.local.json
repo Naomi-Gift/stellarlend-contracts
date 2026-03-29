@@ -5,6 +5,7 @@
       "Bash(rustup target:*)",
       "Bash(cargo test:*)",
       "Bash(find:*)",
+      "Bash(echo \"EXIT:$?\")",
       "Bash(cargo tarpaulin:*)",
       "Bash(echo \"EXIT:$?\")",
       "Bash(cargo fmt:*)",
