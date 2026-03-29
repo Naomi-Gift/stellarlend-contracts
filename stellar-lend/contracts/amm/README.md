@@ -30,7 +30,7 @@ This contract provides Automated Market Maker (AMM) integration for the StellarL
 ## Security Features
 
 - Slippage protection with configurable tolerances
-- Callback validation with nonce-based replay protection
+- Callback validation with nonce-based replay protection and deadline (expiry) checks
 - Admin-only configuration functions
 - Comprehensive parameter validation
 - Emergency pause functionality integration

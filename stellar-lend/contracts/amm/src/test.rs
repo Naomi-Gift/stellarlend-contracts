@@ -1,5 +1,5 @@
 use super::*;
-use crate::amm::*;
+use crate::amm::{AmmDataKey, *};
 use soroban_sdk::{testutils::Address as _, testutils::Ledger, Address, Env, Symbol, Vec};
 
 fn create_amm_contract<'a>(env: &Env) -> AmmContractClient<'a> {
@@ -809,40 +809,9 @@ fn test_callback_validation_success() {
     env.ledger().set_timestamp(1000);
     contract.execute_swap(&user, &params);
 
-    // The nonce should now be 1 in storage (since it starts at 0, incremented during swap)
-    // Wait, generate_callback_nonce returns current + 1.
-    // So after one swap, nonce in storage is 1.
-    // The callback_data sent TO the AMM during the swap has nonce 1.
-    // The AMM calls validate_amm_callback with nonce 1.
-    // validate_amm_callback checks if callback_data.nonce == expected (0 initially, wait...)
-
-    // Let's re-read generate_callback_nonce:
-    // fn generate_callback_nonce(env: &Env, user: &Address) -> u64 {
-    //    let current_nonce = storage.get(user).unwrap_or(0);
-    //    let new_nonce = current_nonce + 1;
-    //    storage.set(user, new_nonce);
-    //    new_nonce
-    // }
-    //
-    // And validate_amm_callback:
-    // pub fn validate_amm_callback(..., callback_data) {
-    //    let expected_nonce = storage.get(user).unwrap_or(0);
-    //    if callback_data.nonce != expected_nonce { error }
-    //    storage.set(user, expected_nonce + 1);
-    // }
-
-    // There is a BUG in the contract logic:
-    // execute_swap calls generate_callback_nonce which SETS the nonce to 1.
-    // then it calls execute_amm_swap with nonce 1.
-    // execute_amm_swap calls validate_amm_callback.
-    // validate_amm_callback GETS the nonce (which is now 1) and compares it to callback_data.nonce (which is 1).
-    // So it works, BUT then it increments it to 2.
-
-    // Wait, let me check the existing test `test_callback_validation`.
-    // It says nonce 999 is wrong.
-
+    // `execute_swap` allocates nonce 1 and `validate_amm_callback_core` consumes it, leaving stored nonce 2.
     let callback_data = AmmCallbackData {
-        nonce: 2, // Should be 2 now
+        nonce: 2,
         operation: Symbol::new(&env, "swap"),
         user: user.clone(),
         expected_amounts: Vec::new(&env),
@@ -850,6 +819,223 @@ fn test_callback_validation_success() {
     };
 
     contract.validate_amm_callback(&protocol_addr, &callback_data);
+}
+
+#[test]
+fn test_validate_amm_callback_fails_without_caller_auth() {
+    let env = Env::default();
+
+    let contract = create_amm_contract(&env);
+    let admin = Address::generate(&env);
+    let user = Address::generate(&env);
+    let protocol_addr = Address::generate(&env);
+
+    contract.initialize_amm_settings(&admin, &100, &1000, &10000);
+    let protocol_config = create_test_protocol_config(&env, &protocol_addr);
+    contract.add_amm_protocol(&admin, &protocol_config);
+
+    let callback_data = AmmCallbackData {
+        nonce: 0,
+        operation: Symbol::new(&env, "swap"),
+        user: user.clone(),
+        expected_amounts: Vec::new(&env),
+        deadline: env.ledger().timestamp() + 3600,
+    };
+
+    let result = contract.try_validate_amm_callback(&protocol_addr, &callback_data);
+    assert!(result.is_err());
+}
+
+#[test]
+fn test_validate_amm_callback_succeeds_with_caller_auth() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let contract = create_amm_contract(&env);
+    let admin = Address::generate(&env);
+    let user = Address::generate(&env);
+    let protocol_addr = Address::generate(&env);
+
+    contract.initialize_amm_settings(&admin, &100, &1000, &10000);
+    let protocol_config = create_test_protocol_config(&env, &protocol_addr);
+    contract.add_amm_protocol(&admin, &protocol_config);
+
+    let callback_data = AmmCallbackData {
+        nonce: 0,
+        operation: Symbol::new(&env, "swap"),
+        user: user.clone(),
+        expected_amounts: Vec::new(&env),
+        deadline: env.ledger().timestamp() + 3600,
+    };
+
+    assert!(contract
+        .try_validate_amm_callback(&protocol_addr, &callback_data)
+        .unwrap()
+        .is_ok());
+}
+
+#[test]
+fn test_callback_replay_fails() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let contract = create_amm_contract(&env);
+    let admin = Address::generate(&env);
+    let user = Address::generate(&env);
+    let protocol_addr = Address::generate(&env);
+
+    contract.initialize_amm_settings(&admin, &100, &1000, &10000);
+    let protocol_config = create_test_protocol_config(&env, &protocol_addr);
+    contract.add_amm_protocol(&admin, &protocol_config);
+
+    let callback_data = AmmCallbackData {
+        nonce: 0,
+        operation: Symbol::new(&env, "swap"),
+        user: user.clone(),
+        expected_amounts: Vec::new(&env),
+        deadline: env.ledger().timestamp() + 3600,
+    };
+
+    assert!(contract
+        .try_validate_amm_callback(&protocol_addr, &callback_data)
+        .unwrap()
+        .is_ok());
+    let replay = contract.try_validate_amm_callback(&protocol_addr, &callback_data);
+    assert!(replay.is_err());
+}
+
+#[test]
+fn test_callback_disabled_protocol_fails() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let contract = create_amm_contract(&env);
+    let admin = Address::generate(&env);
+    let user = Address::generate(&env);
+    let protocol_addr = Address::generate(&env);
+
+    contract.initialize_amm_settings(&admin, &100, &1000, &10000);
+    let mut protocol_config = create_test_protocol_config(&env, &protocol_addr);
+    protocol_config.enabled = false;
+    contract.add_amm_protocol(&admin, &protocol_config);
+
+    let callback_data = AmmCallbackData {
+        nonce: 0,
+        operation: Symbol::new(&env, "swap"),
+        user: user.clone(),
+        expected_amounts: Vec::new(&env),
+        deadline: env.ledger().timestamp() + 3600,
+    };
+
+    let result = contract.try_validate_amm_callback(&protocol_addr, &callback_data);
+    assert!(result.is_err());
+}
+
+#[test]
+fn test_callback_unregistered_protocol_fails() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let contract = create_amm_contract(&env);
+    let admin = Address::generate(&env);
+    let user = Address::generate(&env);
+    let protocol_addr = Address::generate(&env);
+    let other_protocol = Address::generate(&env);
+
+    contract.initialize_amm_settings(&admin, &100, &1000, &10000);
+    let protocol_config = create_test_protocol_config(&env, &protocol_addr);
+    contract.add_amm_protocol(&admin, &protocol_config);
+
+    let callback_data = AmmCallbackData {
+        nonce: 0,
+        operation: Symbol::new(&env, "swap"),
+        user: user.clone(),
+        expected_amounts: Vec::new(&env),
+        deadline: env.ledger().timestamp() + 3600,
+    };
+
+    let result = contract.try_validate_amm_callback(&other_protocol, &callback_data);
+    assert!(result.is_err());
+}
+
+#[test]
+fn test_callback_nonce_overflow_on_increment() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let contract = create_amm_contract(&env);
+    let admin = Address::generate(&env);
+    let user = Address::generate(&env);
+    let protocol_addr = Address::generate(&env);
+
+    contract.initialize_amm_settings(&admin, &100, &1000, &10000);
+    let protocol_config = create_test_protocol_config(&env, &protocol_addr);
+    contract.add_amm_protocol(&admin, &protocol_config);
+
+    env.as_contract(&contract.address, || {
+        let nonce_key = AmmDataKey::CallbackNonces(user.clone());
+        env.storage().persistent().set(&nonce_key, &u64::MAX);
+    });
+
+    let callback_data = AmmCallbackData {
+        nonce: u64::MAX,
+        operation: Symbol::new(&env, "swap"),
+        user: user.clone(),
+        expected_amounts: Vec::new(&env),
+        deadline: env.ledger().timestamp() + 3600,
+    };
+
+    let result = contract.try_validate_amm_callback(&protocol_addr, &callback_data);
+    assert!(result.is_err());
+}
+
+#[test]
+fn test_generate_callback_nonce_overflow_on_swap() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let contract = create_amm_contract(&env);
+    let admin = Address::generate(&env);
+    let user = Address::generate(&env);
+    let protocol_addr = Address::generate(&env);
+    let token_b = Address::generate(&env);
+
+    contract.initialize_amm_settings(&admin, &100, &1000, &10000);
+
+    let mut supported_pairs = Vec::new(&env);
+    supported_pairs.push_back(TokenPair {
+        token_a: None,
+        token_b: Some(token_b.clone()),
+        pool_address: Address::generate(&env),
+    });
+    let protocol_config = AmmProtocolConfig {
+        protocol_address: protocol_addr.clone(),
+        protocol_name: Symbol::new(&env, "Test"),
+        enabled: true,
+        fee_tier: 30,
+        min_swap_amount: 10,
+        max_swap_amount: 1000000,
+        supported_pairs,
+    };
+    contract.add_amm_protocol(&admin, &protocol_config);
+
+    env.as_contract(&contract.address, || {
+        let nonce_key = AmmDataKey::CallbackNonces(user.clone());
+        env.storage().persistent().set(&nonce_key, &u64::MAX);
+    });
+
+    let params = SwapParams {
+        protocol: protocol_addr.clone(),
+        token_in: None,
+        token_out: Some(token_b.clone()),
+        amount_in: 1000,
+        min_amount_out: 100,
+        slippage_tolerance: 100,
+        deadline: env.ledger().timestamp() + 3600,
+    };
+
+    let result = contract.try_execute_swap(&user, &params);
+    assert!(result.is_err());
 }
 
 #[test]
