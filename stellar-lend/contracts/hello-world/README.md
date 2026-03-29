@@ -2,11 +2,6 @@
 
 This contract exposes the core API for StellarLend, including lending/borrowing, cross-asset operations, bridges, analytics, monitoring, recovery/multisig, upgrades, data and configuration.
 
-## Documentation
-
-- [Interest Numeric Assumptions](../../docs/INTEREST_NUMERIC_ASSUMPTIONS.md) documents the shared numeric bounds, checked-arithmetic assumptions, utilization caps, and long-horizon accrual notes behind the interest model.
-- [Repay Entrypoint Technical Documentation](./docs/repay.md) explains how repayments accrue interest, apply funds, and update protocol state.
-
 ## Key Entry Points
 
 - Initialization: `initialize(admin)`
@@ -26,3 +21,8 @@ This contract exposes the core API for StellarLend, including lending/borrowing,
 - Config: `config_set`, `config_get`, `config_backup`, `config_restore`
 
 Refer to `src/lib.rs` for detailed types and events.
+
+## Security Notes
+
+- Reentrancy guarantees and Soroban execution-model assumptions are documented in [`REENTRANCY.md`](./REENTRANCY.md).
+
