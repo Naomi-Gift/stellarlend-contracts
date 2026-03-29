@@ -33,18 +33,18 @@ pub mod withdraw_test;
 // pub mod events_test;
 // pub mod integration_test;      // wrong arg counts
 // pub mod interest_accrual_test;
-pub mod interest_rate_test;    // re-enabled: API aligned with new entrypoints
-// pub mod liquidate_test;
-// pub mod multisig_governance_execution_test; // private governance types + missing functions
-// pub mod pause_test;            // set_pause_switches API mismatch
-// pub mod repay_test;
-// pub mod reserve_test;
-// pub mod security_test;
-// pub mod storage_test;
-// pub mod test;                  // inline pub mod inside function body (merge artifact)
-// pub mod test_cross_asset;
-// pub mod test_cross_asset_borrow_repay_edge_cases;
-pub mod test_helpers;
+pub mod interest_rate_test; // re-enabled: API aligned with new entrypoints
+                            // pub mod liquidate_test;
+                            // pub mod multisig_governance_execution_test; // private governance types + missing functions
+                            // pub mod pause_test;            // set_pause_switches API mismatch
+                            // pub mod repay_test;
+pub mod reserve_test; // re-enabled: reserve module tests aligned with implementation
+                      // pub mod security_test;
+                      // pub mod storage_test;
+                      // pub mod test;                  // inline pub mod inside function body (merge artifact)
+                      // pub mod test_cross_asset;
+                      // pub mod test_cross_asset_borrow_repay_edge_cases;
 pub mod cross_asset_test;
+pub mod test_helpers;
 // pub mod views_test;
 // pub mod fees_test;
