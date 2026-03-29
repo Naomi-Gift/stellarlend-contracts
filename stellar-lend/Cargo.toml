@@ -8,6 +8,10 @@ members = [
   "contracts/hello-world",
   "contracts/lending",
 ]
+exclude = [
+  "contracts/hello-world",
+  "indexing_system"
+]
 
 [workspace.dependencies]
 soroban-sdk = "23.4.1"
