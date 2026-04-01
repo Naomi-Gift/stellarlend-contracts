@@ -25,10 +25,14 @@ use soroban_sdk::{Address, Env, Symbol, Vec};
 
 use crate::errors::GovernanceError;
 use crate::governance::{
-    approve_proposal, execute_proposal, get_multisig_config, get_proposal, get_proposal_approvals,
+    approve_proposal, create_proposal, emit_approval_event, emit_proposal_executed_event,
+    execute_multisig_proposal, execute_proposal, get_multisig_admins, get_multisig_config,
+    get_multisig_threshold, get_proposal, get_proposal_approvals, set_multisig_admins,
+    set_multisig_threshold,
 };
+use crate::errors::GovernanceError;
 use crate::storage::GovernanceDataKey;
-use crate::types::Proposal;
+use crate::types::{Proposal, ProposalStatus, ProposalType};
 
 // ============================================================================
 // Admin Management
@@ -126,13 +130,8 @@ pub fn ms_propose_set_min_cr(
     }
 
     // Delegates auth check + proposal creation to governance.rs
-    let proposal_id = crate::governance::propose_set_min_collateral_ratio(
-        env,
-        proposer.clone(),
-        new_ratio
-            .try_into()
-            .map_err(|_| GovernanceError::MathOverflow)?,
-    )?;
+    let proposal_id =
+        crate::governance::propose_set_min_collateral_ratio(env, proposer.clone(), new_ratio.try_into().map_err(|_| GovernanceError::MathOverflow)?)?;
 
     // Proposer auto-approves their own proposal
     approve_proposal(env, proposer, proposal_id)?;
@@ -175,7 +174,7 @@ pub fn ms_approve(env: &Env, approver: Address, proposal_id: u64) -> Result<(), 
 ///   was already executed.
 /// - [`GovernanceError::ProposalNotReady`] if a timelock is still active.
 pub fn ms_execute(env: &Env, executor: Address, proposal_id: u64) -> Result<(), GovernanceError> {
-    execute_proposal(env, executor, proposal_id)
+    execute_multisig_proposal(env, executor, proposal_id)
 }
 
 // ============================================================================
